@@ -7,7 +7,10 @@
   whose apiKeyHelper points at the installed key.ps1, DPAPI-encrypts the
   Meta Model API key you paste into modelapi-key.dpapi (this Windows user
   only), and adds the install directory to your user PATH so plain
-  `muse-mode on | off | status` works in any terminal.
+  `muse-mode on | off | status` works in any terminal. It also writes Muse
+  usage pricing (Meta per-Mtok rates) to
+  C:\Program Files\ClaudeCode\managed-settings.json (one UAC prompt),
+  so /cost prices Muse models instead of reporting "unknown models".
 
   The key is held as a SecureString, never printed, never logged, and the
   plaintext buffer is zeroed after encryption. Re-running replaces the
@@ -105,13 +108,14 @@ function Get-InstallerBanner {
    2. Encrypt your Meta Model API key (DPAPI, this Windows user only)
    3. Write a machine-local settings.json (your own files untouched)
    4. Add the install folder to your user PATH
+   5. Write Muse usage pricing (one admin prompt, Meta rates)
 '@
   return ($text -replace "`r?`n", "`r`n")
 }
 
 function Get-TargetMenu([string]$Recommended) {
   $lines = @(
-    ' Where will you use Claude Code?  (Step 1 of 2)',
+    ' Where will you use Claude Code?  (Step 1 of 3)',
     ' Pick the line that matches you - each choice builds on the last.',
     '',
     '   [1] Vanilla CLI',
@@ -169,14 +173,14 @@ function Show-InstallerBanner {
 function Show-TargetMenu([string]$Recommended) {
   foreach ($line in (Get-TargetMenu $Recommended) -split "`r`n") {
     if ($line -match '^\s+\[\d\]') { Write-UiLine $line Yellow }
-    elseif ($line -match 'Step 1 of 2') { Write-UiLine $line Yellow }
+    elseif ($line -match 'Step 1 of 3') { Write-UiLine $line Yellow }
     else { Write-UiLine $line }
   }
 }
 
 function Request-ApiKey {
   Write-UiLine
-  Write-UiLine ' Your Meta Model API key  (Step 2 of 2)' Yellow
+  Write-UiLine ' Your Meta Model API key  (Step 2 of 3)' Yellow
   Write-UiLine ' Paste the key below. It is never displayed, never logged,'
   Write-UiLine ' and is encrypted immediately (DPAPI: only your Windows'
   Write-UiLine ' user can ever read it back).'
@@ -279,6 +283,120 @@ function Install-VSCodeProfile([string]$LauncherPath) {
   Write-Output 'Added the VS Code "Muse" terminal profile.'
 }
 
+# Muse usage pricing. Claude Code prices unknown model ids at Anthropic
+# fallback rates ("unknown models" warning), so the installer writes Meta
+# per-Mtok rates as modelPricing overrides. Honored only from the
+# admin-controlled managed-settings.json (user settings.json is ignored
+# by design), hence one UAC prompt. Self-toggling: rows match muse-* ids
+# only, so Anthropic sessions keep built-in list pricing.
+# Meta rate card 2026-09-29 (dev.meta.ai/docs/pricing-rate-limits):
+# contributor (1.3/1.2-contributor) in $0.10 / out $0.20 / cached $0.002;
+# standard (1.3, 1.2, 1.1) in $1.25 / out $4.25 / cached $0.15 per 1M.
+# cacheWrite = input: the page lists no separate write rate, and cache
+# creation bills at the input rate.
+function Get-MusePricingJson {
+  $rows = @(
+    @('muse-spark-1.3-contributor', 0.1, 0.2, 0.002, 0.1),
+    @('muse-spark-1.2-contributor', 0.1, 0.2, 0.002, 0.1),
+    @('muse-spark-1.3', 1.25, 4.25, 0.15, 1.25),
+    @('muse-spark-1.2', 1.25, 4.25, 0.15, 1.25),
+    @('muse-spark-1.1', 1.25, 4.25, 0.15, 1.25)
+  )
+  $overrides = [ordered]@{}
+  foreach ($row in $rows) {
+    $overrides[$row[0]] = [ordered]@{
+      input = $row[1]; output = $row[2]; cacheRead = $row[3]; cacheWrite = $row[4]
+    }
+  }
+  $doc = [ordered]@{ modelPricing = [ordered]@{ overrides = $overrides } }
+  return ($doc | ConvertTo-Json -Depth 8)
+}
+
+function Get-ManagedSettingsPath {
+  # Tests only: redirect at a temp file instead of Program Files.
+  if (-not [string]::IsNullOrWhiteSpace($env:MUSE_TEST_MANAGED_SETTINGS)) {
+    return $env:MUSE_TEST_MANAGED_SETTINGS
+  }
+  return 'C:\Program Files\ClaudeCode\managed-settings.json'
+}
+
+function Install-MusePricing {
+  # Returns $true when the file was written (or already current), $false
+  # when elevation was declined or unavailable (non-fatal: /cost keeps
+  # fallback pricing, everything else works).
+  $path = Get-ManagedSettingsPath
+  $wanted = Get-MusePricingJson
+  if ((Test-Path -LiteralPath $path) -and
+      ((Get-Content -Raw -LiteralPath $path) -eq $wanted)) {
+    Write-Output 'Muse usage pricing already set.'
+    return $true
+  }
+  if (-not [string]::IsNullOrWhiteSpace($env:MUSE_TEST_MANAGED_SETTINGS)) {
+    # Test sandbox: plain write, no elevation.
+    $dir = Split-Path $path -Parent
+    if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+    Write-Utf8NoBom $path $wanted
+    return $true
+  }
+  if (-not [Environment]::UserInteractive) {
+    # Non-interactive runs (CI) cannot answer a UAC prompt: skip loudly.
+    Write-Warning 'Skipping Muse usage pricing (non-interactive session cannot show the admin prompt). /cost keeps fallback pricing; re-run the installer interactively to add it.'
+    return $false
+  }
+  try {
+    $principal = New-Object Security.Principal.WindowsPrincipal(
+      [Security.Principal.WindowsIdentity]::GetCurrent())
+    $isAdmin = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+  }
+  catch { $isAdmin = $false }
+  if ($isAdmin) {
+    # Already elevated: write directly, no second prompt.
+    $dir = Split-Path $path -Parent
+    if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+    Write-Utf8NoBom $path $wanted
+    if ((Get-Content -Raw -LiteralPath $path) -ne $wanted) {
+      Write-Warning 'Muse usage pricing verification failed. /cost keeps fallback pricing; re-run the installer to retry.'
+      return $false
+    }
+    Write-Output 'Wrote Muse usage pricing (Meta rates; new sessions price Muse at Meta rates).'
+    return $true
+  }
+  Write-UiLine ' Muse usage pricing needs one admin step (Step 3 of 3).' Yellow
+  Write-UiLine ' A UAC prompt will ask for permission to write'
+  Write-UiLine ' C:\Program Files\ClaudeCode\managed-settings.json'
+  Write-UiLine ' (Meta per-token rates, so /cost stops saying "unknown models").'
+  try {
+    $tmp = Join-Path ([IO.Path]::GetTempPath()) 'muse-managed-settings.json'
+    Write-Utf8NoBom $tmp $wanted
+    $cmd = "New-Item -ItemType Directory -Path 'C:\Program Files\ClaudeCode' -Force | Out-Null; " +
+      "Copy-Item -LiteralPath '$tmp' -Destination '$path' -Force; " +
+      "Remove-Item -LiteralPath '$tmp' -Force -ErrorAction SilentlyContinue"
+    $proc = Start-Process powershell -Verb RunAs -ArgumentList @(
+      '-NoProfile', '-NonInteractive', '-Command', $cmd) -Wait -PassThru
+    if ($proc.ExitCode -ne 0) {
+      Write-Warning 'Muse usage pricing was not installed (elevation declined or failed). /cost keeps fallback pricing; re-run the installer to retry.'
+      return $false
+    }
+  }
+  catch {
+    Write-Warning 'Muse usage pricing was not installed (elevation declined or failed). /cost keeps fallback pricing; re-run the installer to retry.'
+    return $false
+  }
+  # Verify the elevated copy landed byte-identical.
+  try {
+    if ((Get-Content -Raw -LiteralPath $path) -ne $wanted) {
+      Write-Warning 'Muse usage pricing verification failed. /cost keeps fallback pricing; re-run the installer to retry.'
+      return $false
+    }
+  }
+  catch {
+    Write-Warning 'Muse usage pricing verification failed. /cost keeps fallback pricing; re-run the installer to retry.'
+    return $false
+  }
+  Write-Output 'Wrote Muse usage pricing (Meta rates; new sessions price Muse at Meta rates).'
+  return $true
+}
+
 $srcDir = Join-Path $PSScriptRoot 'src'
 foreach ($required in @('muse-mode.ps1', 'muse-mode.cmd', 'muse-claude.cmd', 'key.ps1', 'muse-shim.js')) {
   if (-not (Test-Path -LiteralPath (Join-Path $srcDir $required))) {
@@ -352,6 +470,10 @@ if (-not $NoPathUpdate) {
 $written = Get-Content -Raw -LiteralPath (Join-Path $InstallDir 'settings.json') | ConvertFrom-Json
 if ([string]::IsNullOrWhiteSpace($written.apiKeyHelper)) { throw 'settings.json verification failed.' }
 if (-not (Test-Path -LiteralPath (Join-Path $InstallDir 'key.ps1'))) { throw 'key.ps1 missing after install.' }
+# Usage pricing (Meta rates): needs one admin write. Non-fatal when declined
+# or unavailable (CI/tests set MUSE_TEST_MANAGED_SETTINGS instead): /cost
+# keeps fallback pricing, everything else works.
+Install-MusePricing | Out-Null
 if ($target -eq 'vscode') {
   Install-VSCodeProfile (Join-Path $InstallDir 'muse-claude.cmd')
 }

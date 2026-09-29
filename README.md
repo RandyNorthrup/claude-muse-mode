@@ -47,14 +47,17 @@ cd claude-muse-mode
 powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
-The installer walks you through two guided steps. First, pick where you
+The installer walks you through three guided steps. First, pick where you
 use Claude Code — `[1]` vanilla CLI (tools on your user PATH, any
 terminal), `[2]` VS Code (plus a `"Muse"` terminal profile), `[3]` another
 IDE or editor (plus setup notes); each choice is labeled, one is
 recommended for your machine, and words work too (`cli`, `vscode`,
 `other`). Then paste your API key (never displayed, DPAPI-encrypted for
-your Windows user only). It writes machine-local `settings.json` and adds
-the install directory to your user PATH. Open a **new** terminal
+your Windows user only). Finally, one UAC prompt writes Muse usage pricing
+(Meta per-token rates) to `C:\Program Files\ClaudeCode\managed-settings.json`,
+so `/cost` prices Muse models instead of reporting "unknown models" —
+declining just keeps fallback pricing. It writes machine-local
+`settings.json` and adds the install directory to your user PATH. Open a **new** terminal
 afterwards, then:
 
 ```powershell
@@ -63,6 +66,15 @@ muse-mode on -Model <other-id>  # pin every tier to one id, without leaving Muse
 ```
 
 Then open a new Claude Code session (a new Claude tab in VS Code) to use Muse.
+
+Usage cost in Muse mode: Claude Code has no price table for `muse-*`
+ids, so without pricing data `/cost` reports "unknown models" with
+fallback math. The installer writes Meta's rates (contributor: in $0.10 /
+out $0.20 / cached $0.002; standard: in $1.25 / out $4.25 / cached $0.15
+per 1M tokens) as `modelPricing` overrides; the panel then prices Muse
+sessions at Meta rates ("at your organization's configured rates") while
+Anthropic sessions keep list pricing. Takes effect in new sessions;
+figures are estimates, not an invoice.
 
 Options: `-Target <cli|vscode|other>` to skip the menu (required for
 non-interactive runs), `-InstallDir <path>` to choose the target

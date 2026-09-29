@@ -33,6 +33,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   (per-choice descriptions, auto-recommended target, words accepted),
   friendly invalid-input reprompts, an instructed API-key prompt with a
   labeled keep/replace choice, and a next-steps summary.
+- Installer writes Muse usage pricing: Meta per-Mtok rates as
+  `modelPricing` overrides to
+  `C:\Program Files\ClaudeCode\managed-settings.json` (one UAC prompt;
+  non-fatal when declined or non-interactive — `/cost` keeps fallback
+  pricing). Panel then prices Muse sessions at Meta rates instead of
+  "unknown models"; self-toggling (muse-* ids only).
 
 ### Fixed
 

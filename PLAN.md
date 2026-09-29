@@ -131,10 +131,27 @@ Brief: PROJECT_BRIEF.md (Confirmed 2026-09-29).
   contributor, haiku the smallest, subagent follows haiku). `-Model <id>`
   still pins every tier to one id. Same mapping in `muse-claude.cmd` via
   MUSE_MODEL default branches. `status` prints the per-tier triple when
-  tiers differ. Open: `modelPricing` managed-settings overrides for Muse
-  ids so /cost stops saying "unknown models" — needs Meta per-Mtok rates
-  and a managed-settings.json write (user-level settings.json is ignored
-  by design; warned: needs pricing page + elevation decision).
+  tiers differ. `modelPricing` cost fix resolved by D16 below.
+- D16: Muse usage pricing (panel said "unknown models", $4.05 fallback).
+  Meta rate card 2026-09-29: contributor (1.3/1.2-contributor) in $0.10 /
+  out $0.20 / cached $0.002; standard (1.3, 1.2, 1.1) in $1.25 / out
+  $4.25 / cached $0.15 per 1M; cacheWrite assumed = input (page lists no
+  write rate). Fix: `modelPricing` overrides, honored only from
+  `C:/Program Files/ClaudeCode/managed-settings.json` (user settings.json
+  ignored by design). Deployed machine-local 2026-09-29 (elevated copy;
+  not repo content). Self-toggling: rows match muse-* ids only, Anthropic
+  sessions keep built-in pricing. Fresh session to take effect; /model
+  labels stay at list; figures estimates not invoice. Smoke: `claude
+  --print` on muse-spark-1.3-contributor ok, no pricing warnings;
+  screenshot session recomputes ~$0.05. Installer wires it (owner voted
+  yes 2026-09-29): `install.ps1` step 3 of 3 writes the pricing JSON via
+  one UAC prompt (`Install-MusePricing`; already-elevated writes direct,
+  non-interactive skips loudly, declined is non-fatal). Single-file rule
+  kept: pricing JSON built by pure `Get-MusePricingJson`, tests load it
+  plus `Install-MusePricing` via AST like the other TUI helpers;
+  `MUSE_TEST_MANAGED_SETTINGS` redirects Pester at temp files (never a
+  real UAC prompt). Open: `[1m]` context suffix for muse ids (200k
+  auto-compact cap warning — owner call).
 
 ## Red-drill evidence
 
@@ -151,6 +168,7 @@ Brief: PROJECT_BRIEF.md (Confirmed 2026-09-29).
 | web_search drop | drop disabled | yes, 1!==0 exit 1 | yes, SELF-TEST PASS |
 | thinking drop | delete disabled | yes, true!==false exit 1 | yes, SELF-TEST PASS |
 | SSE thinking filter | branch disabled | yes, true!==false exit 1 | yes, SELF-TEST PASS |
+| muse pricing rates | expectation to `999.999` | yes, 29/30 exit 1 | yes, 30/30 |
 
 ## Notes
 

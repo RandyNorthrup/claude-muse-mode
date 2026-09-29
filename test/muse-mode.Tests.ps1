@@ -17,7 +17,9 @@ function Import-InstallerTui {
     $installScript, [ref]$tokens, [ref]$errors)
   if ($errors.Count -gt 0) { throw "install.ps1 has syntax errors: $($errors.Count)" }
   $wanted = @('Get-InstallerBanner', 'Get-TargetMenu', 'Convert-TargetChoice',
-    'Get-RecommendedTarget', 'Get-InstallSummary', 'Write-UiLine')
+    'Get-RecommendedTarget', 'Get-InstallSummary', 'Write-UiLine',
+    'Write-Utf8NoBom',
+    'Get-MusePricingJson', 'Get-ManagedSettingsPath', 'Install-MusePricing')
   $found = $ast.FindAll(
     { $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst] },
     $true) | Where-Object { $wanted -contains $_.Name }
@@ -137,6 +139,9 @@ Describe 'muse-mode model flag' {
 
 Describe 'install.ps1 sandbox run' {
   $work = Join-Path ([IO.Path]::GetTempPath()) ('muse-install-test-' + [Guid]::NewGuid().ToString('N'))
+  # Redirect the admin-only pricing write at a temp file: Pester must never
+  # trigger a UAC prompt.
+  $env:MUSE_TEST_MANAGED_SETTINGS = Join-Path $work 'managed-settings.json'
   $canaryPlain = 'canary-' + [Guid]::NewGuid().ToString('N')
   # Built char-by-char so the plaintextCmdlet rule stays strict everywhere.
   $canary = New-Object Security.SecureString
@@ -177,6 +182,13 @@ Describe 'install.ps1 sandbox run' {
     Test-Path -LiteralPath (Join-Path $work 'muse-shim.js') | Should Be $true
   }
 
+  It 'installer writes Muse usage pricing to the redirected path' {
+    $doc = Get-Content -Raw -LiteralPath (Join-Path $work 'managed-settings.json') | ConvertFrom-Json
+    $doc.modelPricing.overrides.'muse-spark-1.3-contributor'.input | Should Be 0.1
+    $doc.modelPricing.overrides.'muse-spark-1.1'.output | Should Be 4.25
+  }
+
+  Remove-Item Env:\MUSE_TEST_MANAGED_SETTINGS -ErrorAction SilentlyContinue
   Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
   # Test shim from the round-trip (temp port): stop it and remove its tracks.
   & node (Join-Path $repoSrc 'muse-shim.js') --stop | Out-Null
@@ -190,6 +202,7 @@ Describe 'install.ps1 vscode target' {
   $codeSettings = Join-Path $work3 'code-settings.json'
   '{"editor.fontSize": 14}' | Set-Content -LiteralPath $codeSettings -Encoding Ascii
   $env:MUSE_TEST_VSCODE_SETTINGS = $codeSettings
+  $env:MUSE_TEST_MANAGED_SETTINGS = Join-Path $work3 'managed-settings.json'
   $canary3 = New-Object Security.SecureString
   ('canary-' + [Guid]::NewGuid().ToString('N')).ToCharArray() | ForEach-Object { $canary3.AppendChar($_) }
   $canary3.MakeReadOnly()
@@ -226,6 +239,7 @@ Describe 'install.ps1 vscode target' {
   }
 
   Remove-Item Env:\MUSE_TEST_VSCODE_SETTINGS -ErrorAction SilentlyContinue
+  Remove-Item Env:\MUSE_TEST_MANAGED_SETTINGS -ErrorAction SilentlyContinue
   Remove-Item -LiteralPath $work3 -Recurse -Force -ErrorAction SilentlyContinue
 }
 
@@ -302,5 +316,59 @@ Describe 'installer TUI text' {
     # of their return values (Object[] instead of string/SecureString).
     ($null -eq (Write-UiLine 'ui')) | Should Be $true
     ($null -eq (Write-UiLine)) | Should Be $true
+  }
+
+  It 'menus number three steps' {
+    (Get-TargetMenu 'cli') | Should Match 'Step 1 of 3'
+    $banner = Get-InstallerBanner
+    $banner | Should Match 'usage pricing'
+  }
+}
+
+Describe 'muse usage pricing' {
+  . Import-InstallerTui
+
+  It 'emits all five spark ids with Meta rates' {
+    $doc = (Get-MusePricingJson) | ConvertFrom-Json
+    $ov = $doc.modelPricing.overrides
+    $ov.'muse-spark-1.3-contributor'.input | Should Be 0.1
+    $ov.'muse-spark-1.3-contributor'.output | Should Be 0.2
+    $ov.'muse-spark-1.3-contributor'.cacheRead | Should Be 0.002
+    $ov.'muse-spark-1.2-contributor'.output | Should Be 0.2
+    $ov.'muse-spark-1.3'.input | Should Be 1.25
+    $ov.'muse-spark-1.3'.output | Should Be 4.25
+    $ov.'muse-spark-1.3'.cacheRead | Should Be 0.15
+    $ov.'muse-spark-1.2'.input | Should Be 1.25
+    $ov.'muse-spark-1.1'.output | Should Be 4.25
+  }
+
+  It 'sandbox write is byte-identical and rerun is a no-op' {
+    $sandbox = Join-Path ([IO.Path]::GetTempPath()) ('muse-pricing-test-' + [Guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $sandbox | Out-Null
+    $env:MUSE_TEST_MANAGED_SETTINGS = Join-Path $sandbox 'managed-settings.json'
+    try {
+      # Rerun emits a status line plus $true; assert on the last object.
+      $first = @(Install-MusePricing)
+      $first[-1] | Should Be $true
+      $back = Get-Content -Raw -LiteralPath $env:MUSE_TEST_MANAGED_SETTINGS
+      $back | Should Be (Get-MusePricingJson)
+      $second = @(Install-MusePricing)
+      $second[-1] | Should Be $true
+      ($second.Count) | Should Be 2
+    }
+    finally {
+      Remove-Item Env:\MUSE_TEST_MANAGED_SETTINGS -ErrorAction SilentlyContinue
+      Remove-Item -LiteralPath $sandbox -Recurse -Force -ErrorAction SilentlyContinue
+    }
+  }
+
+  It 'managed path honors the sandbox redirect' {
+    $env:MUSE_TEST_MANAGED_SETTINGS = 'X:\definitely-not-here\managed-settings.json'
+    try {
+      (Get-ManagedSettingsPath) | Should Be 'X:\definitely-not-here\managed-settings.json'
+    }
+    finally {
+      Remove-Item Env:\MUSE_TEST_MANAGED_SETTINGS -ErrorAction SilentlyContinue
+    }
   }
 }
