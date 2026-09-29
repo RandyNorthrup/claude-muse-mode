@@ -1,17 +1,56 @@
 # claude-muse-mode (unofficial)
 
+[![CI](https://github.com/RandyNorthrup/claude-muse-mode/actions/workflows/ci.yml/badge.svg)](https://github.com/RandyNorthrup/claude-muse-mode/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Platform: Windows](https://img.shields.io/badge/Platform-Windows-0078D6.svg)](install.ps1)
+
 Run Claude Code on Meta's Muse Model API, and switch back to Anthropic with
 one command. No affiliation with or endorsement by Meta.
 
-## What this is
+- [Quick start](#quick-start)
+- [Modes](#modes)
+- [The schema shim](#the-schema-shim)
+- [Install](#install)
+- [Usage cost](#usage-cost)
+- [Options](#options)
+- [Uninstall](#uninstall)
+- [Security](#security)
+- [Layout](#layout)
+- [Development](#development)
+- [License](#license)
 
-- `muse-mode on` — new Claude Code sessions use Muse via Meta's Anthropic-compatible endpoint, with per-tier defaults (opus `muse-spark-1.3-contributor`, sonnet `muse-spark-1.2-contributor`, haiku `muse-spark-1.1`, fable `muse-spark-1.3` — four distinct live chat ids), plus picker `NAME`/`DESCRIPTION` labels so rows show Muse names instead of "Custom <Tier> model", plus the fifth spark id (`muse-spark-1.2`) on the picker's custom row. Subagents follow the main (opus) model.
-- `muse-mode off` — back to Anthropic (your claude.ai login). Whatever model/env settings you had are restored, and the shim is stopped.
-- Turn-chain reminder — every prompt runs the previous tracker, then appends "finish the turn chain" context only while Muse mode is on, so turns keep chaining tools instead of ending on status promises; Claude-mode prompts pass through untouched.
-- `muse-mode status` — which one new sessions will use.
-- `muse-mode shim` — whether the schema shim is running.
-- `muse-claude.cmd` — one-shot launcher: runs `claude` on Muse for that process only, without touching your settings.
-- Works in Windows PowerShell 5.1 and PowerShell 7+.
+## Quick start
+
+```powershell
+git clone https://github.com/RandyNorthrup/claude-muse-mode.git
+cd claude-muse-mode
+powershell -ExecutionPolicy Bypass -File .\install.ps1
+```
+
+Open a **new** terminal, then:
+
+```powershell
+muse-mode on                    # per-tier defaults (opus 1.3-contributor, sonnet 1.2-contributor, haiku 1.1, fable 1.3; spare 1.2 on custom row)
+```
+
+Open a new Claude Code session (a new Claude tab in VS Code) to use Muse.
+Back out any time with `muse-mode off`.
+
+## Modes
+
+| Command | Effect |
+|---|---|
+| `muse-mode on` | New sessions use Muse via Meta's Anthropic-compatible endpoint, with per-tier defaults (opus `muse-spark-1.3-contributor`, sonnet `muse-spark-1.2-contributor`, haiku `muse-spark-1.1`, fable `muse-spark-1.3` â€” four distinct live chat ids), plus picker `NAME`/`DESCRIPTION` labels so rows show Muse names instead of "Custom <Tier> model", plus the fifth spark id (`muse-spark-1.2`) on the picker's custom row. Subagents follow the main (opus) model. |
+| `muse-mode off` | Back to Anthropic (your claude.ai login). Whatever model/env settings you had are restored, and the shim is stopped. |
+| `muse-mode status` | Which one new sessions will use. |
+| `muse-mode shim` | Whether the schema shim is running. |
+| `muse-claude.cmd` | One-shot launcher: runs `claude` on Muse for that process only, without touching your settings. |
+
+Works in Windows PowerShell 5.1 and PowerShell 7+. Every Muse-side
+accommodation toggles: the turn-chain reminder below is injected only
+while Muse mode is on, and Claude-mode prompts pass through untouched.
+
+- Turn-chain reminder â€” every prompt runs the previous tracker, then appends "finish the turn chain" context only while Muse mode is on, so turns keep chaining tools instead of ending on status promises; Claude-mode prompts pass through untouched.
 
 ## The schema shim
 
@@ -33,7 +72,7 @@ unprompted, the shim filters thinking blocks out of responses too (SSE
 streams stay streaming; single-shot JSON bodies are re-packed). The CLI
 still validates tool inputs locally, so no constraint is lost. The shim
 logs a summary line per request (path, tool count, stripped
-keywords/fields, request param names) plus the upstream status line —
+keywords/fields, request param names) plus the upstream status line â€”
 never bodies, headers, or keys. `muse-mode off` stops it; its log lives
 next to it as `muse-shim.log`.
 
@@ -49,14 +88,14 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
 The installer walks you through three guided steps. First, pick where you
-use Claude Code — `[1]` vanilla CLI (tools on your user PATH, any
+use Claude Code â€” `[1]` vanilla CLI (tools on your user PATH, any
 terminal), `[2]` VS Code (plus a `"Muse"` terminal profile), `[3]` another
 IDE or editor (plus setup notes); each choice is labeled, one is
 recommended for your machine, and words work too (`cli`, `vscode`,
 `other`). Then paste your API key (never displayed, DPAPI-encrypted for
 your Windows user only). Finally, one UAC prompt writes Muse usage pricing
 (Meta per-token rates) to `C:\Program Files\ClaudeCode\managed-settings.json`,
-so `/cost` prices Muse models instead of reporting "unknown models" —
+so `/cost` prices Muse models instead of reporting "unknown models" â€”
 declining just keeps fallback pricing. It writes machine-local
 `settings.json` and adds the install directory to your user PATH. Open a **new** terminal
 afterwards, then:
@@ -68,6 +107,8 @@ muse-mode on -Model <other-id>  # pin every tier to one id, without leaving Muse
 
 Then open a new Claude Code session (a new Claude tab in VS Code) to use Muse.
 
+## Usage cost
+
 Usage cost in Muse mode: Claude Code has no price table for `muse-*`
 ids, so without pricing data `/cost` reports "unknown models" with
 fallback math. The installer writes Meta's rates (contributor: in $0.10 /
@@ -76,6 +117,8 @@ per 1M tokens) as `modelPricing` overrides; the panel then prices Muse
 sessions at Meta rates ("at your organization's configured rates") while
 Anthropic sessions keep list pricing. Takes effect in new sessions;
 figures are estimates, not an invoice.
+
+## Options
 
 Options: `-Target <cli|vscode|other>` to skip the menu (required for
 non-interactive runs), `-InstallDir <path>` to choose the target
@@ -87,7 +130,7 @@ single `muse-claude.cmd` run.
 
 1. `muse-mode off` (restores your Anthropic settings and stops the shim).
 2. Delete the install directory (default `%LOCALAPPDATA%\claude-muse-mode`).
-3. Remove that directory from your user PATH (System Properties →
+3. Remove that directory from your user PATH (System Properties â†’
    Environment Variables).
 4. If you installed with the VS Code target, remove the `"Muse"` profile
    from `terminal.integrated.profiles.windows` in your VS Code settings
@@ -142,4 +185,4 @@ gitleaks detect --source . --no-git --verbose
 
 ## License
 
-MIT — see LICENSE.
+MIT â€” see LICENSE.
