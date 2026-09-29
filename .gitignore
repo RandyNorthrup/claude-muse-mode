@@ -1,0 +1,5 @@
+# Machine-local secrets and backups. Never commit these.
+modelapi-key.dpapi
+saved-*.json
+*.bak-muse-mode
+settings.json

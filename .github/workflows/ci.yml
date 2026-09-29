@@ -1,0 +1,42 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Lint (PSScriptAnalyzer)
+        shell: pwsh
+        run: |
+          Install-Module PSScriptAnalyzer -Force -Scope CurrentUser
+          Invoke-ScriptAnalyzer -Path . -Recurse -EnableExit -ErrorAction Stop
+
+      - name: Test (Pester)
+        shell: pwsh
+        run: |
+          Invoke-Pester ./test -EnableExit
+
+      - name: Shim (node check + self-test)
+        shell: pwsh
+        run: |
+          node --check src/muse-shim.js
+          node src/muse-shim.js --self-test
+
+      - name: Secrets (gitleaks)
+        uses: gitleaks/gitleaks-action@v2
+
+      - name: Workflow lint (actionlint)
+        shell: pwsh
+        run: |
+          choco install actionlint -y --no-progress
+          actionlint .github/workflows/*.yml
