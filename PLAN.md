@@ -15,9 +15,14 @@ Brief: PROJECT_BRIEF.md (Confirmed 2026-09-29).
   restore. `off` restores byte-equivalent settings (Pester asserts).
 - D5: Pester 3.4 syntax (`Should Be`) — the version bundled with both
   Windows PowerShell and this machine's PowerShell 7.
-- D6: CI pins `actions/checkout@v4` and `gitleaks/gitleaks-action@v2` tags;
-  PSScriptAnalyzer/actionlint float on latest with green CI as the evidence.
-  (SHA pinning deferred — owner-only repo, no release artifacts.)
+- D6: CI pins `actions/checkout@v4`; PSScriptAnalyzer/actionlint float
+  on latest with green CI as the evidence. (SHA pinning deferred —
+  owner-only repo, no release artifacts.)
+- D19: secrets scanning runs only via the choco-installed gitleaks CLI
+  inside `gates.ps1 -Strict` — the separate `gitleaks-action` step was
+  removed after it broke on an upstream 404 (action tried to download
+  gitleaks 8.24.3 from a dead release URL). One secrets gate, same as
+  every other gate.
 
 ## Compatibility notes
 
@@ -202,7 +207,7 @@ Brief: PROJECT_BRIEF.md (Confirmed 2026-09-29).
 | D15 fable/subagent keys | deleted ANTHROPIC_DEFAULT_FABLE_MODEL from sandbox settings copy | yes, assertion tripped on missing key | yes, re-on restored muse-spark-1.3; Pester 30/30 |
 | muse-gate merge table | expectation to `WRONG-ON-PURPOSE` in temp copy | yes, exit 1 | yes, Pester green, temp copy deleted |
 | CI parity (Pester under v5 images) | six straight red runs (36605500883 et al) | yes, `& $ps1` null on every test | yes, Pester 5 migration green 35/35 |
-| strict gates lint (gates.ps1 self-lint) | real CI failures: run 36608321177 (unapproved verb `Ensure-`, em-dash BOM rule, unused `Strict` param, positional args), then run 36615466899 (`gitleaks` CLI missing on runner under `-Strict`) | yes, both CI red; local exit 6 with 6 warnings on the first | yes, local `gates.ps1 -Strict` exit 0 (LINT-CLEAN, 35/35); CI green after choco-installing gitleaks in the Tools step |
+| strict gates lint (gates.ps1 self-lint) | real CI failures: 36608321177 (unapproved verb `Ensure-`, em-dash BOM rule, unused `Strict` param, positional args), 36615466899 (`gitleaks` CLI missing on runner under `-Strict`), 36617818050 (legacy `gitleaks-action` step 404s on upstream 8.24.3 download) | yes, all three CI red; local exit 6 with 6 warnings on the first | local `gates.ps1 -Strict` exit 0 (LINT-CLEAN, 35/35); runner GATES-GREEN once gitleaks was choco-installed; action step removed (D19), secrets covered by gates |
 
 ## Notes
 
