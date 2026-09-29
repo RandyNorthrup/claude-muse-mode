@@ -37,13 +37,15 @@ cd claude-muse-mode
 powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
-The installer asks where the tools should point — `[1]` vanilla CLI (user
-PATH, any terminal), `[2]` VS Code (PATH plus a `"Muse"` terminal profile
-in your VS Code settings), `[3]` another IDE or editor (PATH plus setup
-notes) — then prompts for your API key (paste; it is never displayed),
-encrypts it with DPAPI for your Windows user only, writes machine-local
-`settings.json`, and adds the install directory to your user PATH. Open a
-**new** terminal afterwards, then:
+The installer walks you through two guided steps. First, pick where you
+use Claude Code — `[1]` vanilla CLI (tools on your user PATH, any
+terminal), `[2]` VS Code (plus a `"Muse"` terminal profile), `[3]` another
+IDE or editor (plus setup notes); each choice is labeled, one is
+recommended for your machine, and words work too (`cli`, `vscode`,
+`other`). Then paste your API key (never displayed, DPAPI-encrypted for
+your Windows user only). It writes machine-local `settings.json` and adds
+the install directory to your user PATH. Open a **new** terminal
+afterwards, then:
 
 ```powershell
 muse-mode on                  # 1.3-contributor, the default

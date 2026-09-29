@@ -5,6 +5,31 @@ $ErrorActionPreference = 'Stop'
 $repoSrc = Join-Path (Split-Path $PSScriptRoot -Parent) 'src'
 $installScript = Join-Path (Split-Path $PSScriptRoot -Parent) 'install.ps1'
 
+# The installer's TUI text helpers live in install.ps1 (kept single-file by
+# design), so load just their definitions: parse the script, re-create each
+# pure function from its AST, define it in this scope. This executes the real
+# shipped functions, not copies. Show-*/Read-Host code is never loaded, so
+# nothing here can prompt.
+function Import-InstallerTui {
+  $tokens = $null
+  $errors = $null
+  $ast = [System.Management.Automation.Language.Parser]::ParseFile(
+    $installScript, [ref]$tokens, [ref]$errors)
+  if ($errors.Count -gt 0) { throw "install.ps1 has syntax errors: $($errors.Count)" }
+  $wanted = @('Get-InstallerBanner', 'Get-TargetMenu', 'Convert-TargetChoice',
+    'Get-RecommendedTarget', 'Get-InstallSummary', 'Write-UiLine')
+  $found = $ast.FindAll(
+    { $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst] },
+    $true) | Where-Object { $wanted -contains $_.Name }
+  foreach ($def in $found) {
+    # Dot-sourced (not &) so the definitions land in this scope.
+    . ([ScriptBlock]::Create($def.Extent.Text)) | Out-Null
+  }
+  if ((@($found).Count) -ne $wanted.Count) {
+    throw 'A TUI helper is missing from install.ps1.'
+  }
+}
+
 # Isolate the schema shim the round-trip exercises: temp port plus temp
 # pid/log files, so tests never touch a real shim on 15555.
 $env:MUSE_SHIM_PORT = '15577'
@@ -188,4 +213,80 @@ Describe 'install.ps1 vscode target' {
 
   Remove-Item Env:\MUSE_TEST_VSCODE_SETTINGS -ErrorAction SilentlyContinue
   Remove-Item -LiteralPath $work3 -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+Describe 'installer TUI text' {
+  # Dot-sourced so the loaded definitions land in this Describe's scope,
+  # where the It blocks below can see them.
+  . Import-InstallerTui
+
+  It 'parses menu answers' {
+    (Convert-TargetChoice '1') | Should Be 'cli'
+    (Convert-TargetChoice '2') | Should Be 'vscode'
+    (Convert-TargetChoice '3') | Should Be 'other'
+    (Convert-TargetChoice 'VSCode') | Should Be 'vscode'
+    (Convert-TargetChoice '  other  ') | Should Be 'other'
+  }
+
+  It 'rejects bad menu answers with $null' {
+    ($null -eq (Convert-TargetChoice 'wat')) | Should Be $true
+    ($null -eq (Convert-TargetChoice '')) | Should Be $true
+    ($null -eq (Convert-TargetChoice $null)) | Should Be $true
+    ($null -eq (Convert-TargetChoice '4')) | Should Be $true
+  }
+
+  It 'labels every choice with instructions' {
+    $menu = Get-TargetMenu 'cli'
+    $menu | Should Match '\[1\].*Vanilla CLI'
+    $menu | Should Match '\[2\].*VS Code'
+    $menu | Should Match '\[3\].*Other IDE'
+    $menu | Should Match 'terminal profile'
+    $menu | Should Match 'Type 1, 2, or 3'
+  }
+
+  It 'marks exactly the recommended choice' {
+    $cliMenu = Get-TargetMenu 'cli'
+    ($cliMenu -match '\[1\].*recommended') | Should Be $true
+    ($cliMenu -match '\[2\].*recommended') | Should Be $false
+    $vsMenu = Get-TargetMenu 'vscode'
+    ($vsMenu -match '\[2\].*recommended') | Should Be $true
+    ($vsMenu -match '\[1\].*recommended') | Should Be $false
+  }
+
+  It 'banner names the product and previews the steps' {
+    $banner = Get-InstallerBanner
+    $banner | Should Match 'claude-muse-mode'
+    $banner | Should Match 'DPAPI'
+    $banner | Should Match 'PATH'
+  }
+
+  It 'keeps banner, menu, and summary lines within 78 columns' {
+    $widest = 0
+    $texts = @((Get-InstallerBanner), (Get-TargetMenu 'vscode'), (Get-InstallSummary 'vscode'))
+    foreach ($text in $texts) {
+      foreach ($line in $text -split "`r`n") {
+        if ($line.Length -gt $widest) { $widest = $line.Length }
+      }
+    }
+    ($widest -le 78) | Should Be $true
+  }
+
+  It 'recommends a valid target on this machine' {
+    (@('cli', 'vscode') -contains (Get-RecommendedTarget)) | Should Be $true
+  }
+
+  It 'summary mentions the switch commands' {
+    $summary = Get-InstallSummary 'vscode'
+    $summary | Should Match 'muse-mode on'
+    $summary | Should Match 'muse-mode off'
+    $summary | Should Match 'Muse'
+  }
+
+  It 'display helper emits nothing to the output stream' {
+    # Regression pin: Write-UiLine renders inside value-returning
+    # functions, so anything it emits to the output stream becomes part
+    # of their return values (Object[] instead of string/SecureString).
+    ($null -eq (Write-UiLine 'ui')) | Should Be $true
+    ($null -eq (Write-UiLine)) | Should Be $true
+  }
 }

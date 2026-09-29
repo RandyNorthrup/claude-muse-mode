@@ -70,6 +70,151 @@ function Write-Utf8NoBom([string]$Path, [string]$Content) {
   [System.IO.File]::WriteAllText($Path, $Content, (New-Object System.Text.UTF8Encoding $false))
 }
 
+# Installer TUI. Display output goes through Write-UiLine (Write-Host), NOT
+# Write-Output: these screens render inside functions whose return values
+# the installer consumes (Select-InstallTarget, Request-ApiKey,
+# Confirm-ReplaceKey), and Write-Output there becomes part of the return
+# value - Object[] where a string/SecureString/bool belongs. Write-Host is
+# host-only, so returns stay clean. Every screen stays fully readable with
+# no color at all. The Get-* helpers are pure text so the test suite can
+# pin the labels without ever prompting.
+function Write-UiLine {
+  [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingWriteHost', '',
+    Justification = 'Installer TUI: host-only display inside value-returning functions; Write-Output would pollute returns.')]
+  param(
+    [string]$Text = '',
+    [System.ConsoleColor]$Color = [System.ConsoleColor]::Gray
+  )
+  Write-Host $Text -ForegroundColor $Color
+}
+
+function Get-InstallerBanner {
+  # Normalized to CRLF: the art is a here-string, so its newlines follow
+  # the file's own line endings, while callers split on CRLF.
+  $text = @'
+  __  __ _   _ ____  _____
+ |  \/  | | | / ___|| ____|
+ | |\/| | | | \___ \|  _|
+ | |  | | |_| |___) | |___
+ |_|  |_|\___/|____/|_____|
+ claude-muse-mode installer  (unofficial)
+ Run Claude Code on Meta's Muse Model API - switch back anytime.
+
+ This installer will:
+   1. Copy the switcher scripts to your install folder
+   2. Encrypt your Meta Model API key (DPAPI, this Windows user only)
+   3. Write a machine-local settings.json (your own files untouched)
+   4. Add the install folder to your user PATH
+'@
+  return ($text -replace "`r?`n", "`r`n")
+}
+
+function Get-TargetMenu([string]$Recommended) {
+  $lines = @(
+    ' Where will you use Claude Code?  (Step 1 of 2)',
+    ' Pick the line that matches you - each choice builds on the last.',
+    '',
+    '   [1] Vanilla CLI',
+    '       The tools on your user PATH; works in any terminal.',
+    '',
+    '   [2] VS Code',
+    '       Everything in [1], plus a "Muse" terminal profile that',
+    '       opens a Muse-ready terminal in one click.',
+    '',
+    '   [3] Other IDE or editor',
+    '       Everything in [1], plus printed setup notes for pointing',
+    '       your editor at the same settings.',
+    '',
+    ' Type 1, 2, or 3 (words work too: cli, vscode, other).'
+  )
+  if (-not [string]::IsNullOrWhiteSpace($Recommended)) {
+    $key = $Recommended.Trim().ToLower()
+    $names = @{ '1' = 'cli'; '2' = 'vscode'; '3' = 'other' }
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+      if ($lines[$i] -match '^\s+\[(\d)\]') {
+        if ($names[$Matches[1]] -eq $key) { $lines[$i] += '   <-- recommended' }
+      }
+    }
+  }
+  return ($lines -join "`r`n")
+}
+
+function Convert-TargetChoice($Answer) {
+  if ($null -eq $Answer) { return $null }
+  $clean = $Answer.ToString().Trim().ToLower()
+  if ($clean -eq '1' -or $clean -eq 'cli') { return 'cli' }
+  if ($clean -eq '2' -or $clean -eq 'vscode') { return 'vscode' }
+  if ($clean -eq '3' -or $clean -eq 'other') { return 'other' }
+  return $null
+}
+
+function Get-RecommendedTarget {
+  # A machine with VS Code gets the VS Code target recommended (either the
+  # `code` command or a settings folder counts as "has VS Code").
+  if (Get-Command code -ErrorAction SilentlyContinue) { return 'vscode' }
+  if (Test-Path -LiteralPath (Join-Path $env:APPDATA 'Code')) { return 'vscode' }
+  return 'cli'
+}
+
+function Show-InstallerBanner {
+  # The art is the first five lines; the rest gets section coloring.
+  $lines = (Get-InstallerBanner) -split "`r`n"
+  for ($i = 0; $i -lt $lines.Count; $i++) {
+    if ($i -lt 5) { Write-UiLine $lines[$i] Cyan }
+    elseif ($lines[$i] -match 'This installer will') { Write-UiLine $lines[$i] Yellow }
+    else { Write-UiLine $lines[$i] }
+  }
+}
+
+function Show-TargetMenu([string]$Recommended) {
+  foreach ($line in (Get-TargetMenu $Recommended) -split "`r`n") {
+    if ($line -match '^\s+\[\d\]') { Write-UiLine $line Yellow }
+    elseif ($line -match 'Step 1 of 2') { Write-UiLine $line Yellow }
+    else { Write-UiLine $line }
+  }
+}
+
+function Request-ApiKey {
+  Write-UiLine
+  Write-UiLine ' Your Meta Model API key  (Step 2 of 2)' Yellow
+  Write-UiLine ' Paste the key below. It is never displayed, never logged,'
+  Write-UiLine ' and is encrypted immediately (DPAPI: only your Windows'
+  Write-UiLine ' user can ever read it back).'
+  Write-UiLine
+  return (Read-Host ' Paste key (input stays hidden)' -AsSecureString)
+}
+
+function Confirm-ReplaceKey {
+  Write-UiLine
+  Write-UiLine ' A stored key already exists.' Yellow
+  Write-UiLine '   [y] Replace it with a new key'
+  Write-UiLine '   [N] Keep the existing key (default - just press Enter)'
+  Write-UiLine
+  return ((Read-Host ' Replace the stored key? [y/N]') -eq 'y')
+}
+
+function Get-InstallSummary([string]$Target) {
+  $lines = @(
+    '',
+    ' Done! Next steps:',
+    '   1. Open a NEW terminal (so it picks up your updated PATH).',
+    '   2. Run:  muse-mode on',
+    '   3. Open a new Claude Code session to use Muse.'
+  )
+  if ($Target -eq 'vscode') {
+    $lines += '   Tip: in VS Code, open a new terminal with the "Muse" profile.'
+  }
+  $lines += '   Back out any time with:  muse-mode off'
+  return ($lines -join "`r`n")
+}
+
+function Show-InstallSummary([string]$Target) {
+  foreach ($line in (Get-InstallSummary $Target) -split "`r`n") {
+    if ($line -match 'Done!') { Write-UiLine $line Green }
+    else { Write-UiLine $line }
+  }
+}
+
 function Select-InstallTarget([string]$Choice) {
   $valid = @('cli', 'vscode', 'other')
   if (-not [string]::IsNullOrWhiteSpace($Choice)) {
@@ -79,15 +224,15 @@ function Select-InstallTarget([string]$Choice) {
   if (-not [Environment]::UserInteractive) {
     throw 'Non-interactive install must pass -Target (cli, vscode, or other).'
   }
-  Write-Output 'Where should the Muse tools point?'
-  Write-Output '  [1] Vanilla CLI - user PATH, works in any terminal'
-  Write-Output '  [2] VS Code - PATH plus a "Muse" terminal profile'
-  Write-Output '  [3] Other IDE or editor - PATH plus manual setup notes'
+  Show-InstallerBanner
+  $recommended = Get-RecommendedTarget
   for ($i = 0; $i -lt 3; $i++) {
-    $answer = Read-Host 'Choose [1/2/3]'
-    if ($answer -eq '1') { return 'cli' }
-    if ($answer -eq '2') { return 'vscode' }
-    if ($answer -eq '3') { return 'other' }
+    Write-UiLine
+    Show-TargetMenu $recommended
+    Write-UiLine
+    $picked = Convert-TargetChoice (Read-Host ' Your choice [1/2/3]')
+    if ($null -ne $picked) { return $picked }
+    Write-UiLine ' Not a choice - type 1, 2, or 3 (or: cli, vscode, other).' Yellow
   }
   throw 'No valid target chosen.'
 }
@@ -157,16 +302,11 @@ Copy-Item -LiteralPath (Join-Path $srcDir 'muse-shim.js') -Destination (Join-Pat
 
 $keyPath = Join-Path $InstallDir 'modelapi-key.dpapi'
 if ((Test-Path -LiteralPath $keyPath) -and (-not $Force) -and ($null -eq $ApiKey)) {
-  $answer = Read-Host 'A stored key already exists. Replace it? [y/N]'
-  if ($answer -ne 'y') {
-    Write-Output 'Keeping the existing stored key.'
-  }
-  else {
-    $ApiKey = Read-Host 'Paste your Meta Model API key' -AsSecureString
-  }
+  if (Confirm-ReplaceKey) { $ApiKey = Request-ApiKey }
+  else { Write-Output 'Keeping the existing stored key.' }
 }
 elseif ($null -eq $ApiKey) {
-  $ApiKey = Read-Host 'Paste your Meta Model API key' -AsSecureString
+  $ApiKey = Request-ApiKey
 }
 
 if ($null -ne $ApiKey) {
@@ -220,4 +360,4 @@ elseif ($target -eq 'other') {
   Write-Output "so it inherits your user PATH ($InstallDir). Its Claude Code extension, if any,"
   Write-Output 'reads the same ~/.claude/settings.json that `muse-mode on` manages.'
 }
-Write-Output 'Done. Open a new terminal, then switch with: muse-mode on  (back with: muse-mode off)'
+Show-InstallSummary $target

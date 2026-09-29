@@ -22,3 +22,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `muse-claude.cmd` run.
 - Installer target menu (`-Target cli|vscode|other`): VS Code target adds
   a `"Muse"` terminal profile; other IDEs get PATH plus setup notes.
+- Installer TUI: ASCII banner with a step overview, a labeled target menu
+  (per-choice descriptions, auto-recommended target, words accepted),
+  friendly invalid-input reprompts, an instructed API-key prompt with a
+  labeled keep/replace choice, and a next-steps summary.

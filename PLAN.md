@@ -75,6 +75,15 @@ Brief: PROJECT_BRIEF.md (Confirmed 2026-09-29).
   `MUSE_TEST_VSCODE_SETTINGS`. JSON helpers duplicated in install.ps1
   (single-file robustness) with cross-reference; shared-file refactor
   rejected (would touch tested shipped code).
+- D9: guided installer TUI (banner, labeled menu + recommendation,
+  instructed key prompt, summary). Single-file rule kept: tests load the
+  pure `Get-*` text helpers from install.ps1 via AST instead of a shared
+  module. Display goes through Write-Host confined to `Write-UiLine`
+  (one `SuppressMessageAttribute`, justification inline): Write-Output
+  there pollutes the return values of the prompting functions (proven by
+  interactive PTY probe — Object[] where SecureString belongs). The old
+  menu's silent re-prompt on invalid input was the reported "hang"; the
+  new menu names the problem and re-shows itself.
 
 ## Red-drill evidence
 
@@ -85,6 +94,7 @@ Brief: PROJECT_BRIEF.md (Confirmed 2026-09-29).
 | gitleaks | randomized `ghp_`-shaped canary file, uncommitted, deleted after | yes, leaks found: 1 | yes, no leaks, canary deleted |
 | shim self-test | `pattern >= 99` assert | yes, exit 1 | yes, SELF-TEST PASS |
 | vscode profile test | profile-path expectation to `does-not-exist-zzz` | yes, 14/15 exit 1 | yes, 15/15 (2026-09-29 resume) |
+| TUI text test | choice expectation to `WRONG-ON-PURPOSE` | yes, 8/9 exit 1 | yes, 9/9 |
 
 ## Notes
 
