@@ -69,9 +69,21 @@ function stripSchema(node, counts) {
   return counts;
 }
 
+// Top-level tool fields Meta's endpoint rejects (Anthropic accepts them).
+// Separate from input_schema keywords: these live on the tool itself.
+// Matched by field, not by tool name: whatever carries max_uses would 400
+// at Meta anyway, and Anthropic ignores it on tools that don't use it.
+function stripToolFields(tool, noStrip, counts) {
+  if (tool && Object.prototype.hasOwnProperty.call(tool, 'max_uses')) {
+    counts.max_uses = (counts.max_uses || 0) + 1;
+    if (!noStrip) delete tool.max_uses;
+  }
+}
+
 function sanitizeTools(body, noStrip) {
   const total = {};
-  if (!body || !Array.isArray(body.tools)) return { body, stripped: total, tools: 0 };
+  const fields = {};
+  if (!body || !Array.isArray(body.tools)) return { body, stripped: total, toolfields: fields, tools: 0 };
   for (const tool of body.tools) {
     if (tool && tool.input_schema) {
       // noStrip: count what WOULD be removed, forward untouched.
@@ -79,8 +91,9 @@ function sanitizeTools(body, noStrip) {
       const counts = stripSchema(target, {});
       for (const [k, n] of Object.entries(counts)) total[k] = (total[k] || 0) + n;
     }
+    if (tool) stripToolFields(tool, noStrip, fields);
   }
-  return { body, stripped: total, tools: body.tools.length };
+  return { body, stripped: total, toolfields: fields, tools: body.tools.length };
 }
 
 function hopHeaders(headers) {
@@ -124,7 +137,7 @@ function startServer(port, upstream, noStrip) {
       if (raw.length > 0 && ctype.includes('application/json')) {
         try {
           const parsed = JSON.parse(raw.toString('utf8'));
-          const { body, stripped, tools } = sanitizeTools(parsed, noStrip);
+          const { body, stripped, toolfields, tools } = sanitizeTools(parsed, noStrip);
           raw = Buffer.from(JSON.stringify(body));
           // Stripping (and re-serializing) changes the body length: the
           // client's original Content-Length would leave the upstream
@@ -132,6 +145,9 @@ function startServer(port, upstream, noStrip) {
           // re-declare the length we actually forward.
           fwdHeaders['content-length'] = String(raw.length);
           logExtra = ` tools=${tools} stripped=${JSON.stringify(stripped)}${noStrip ? ' (count-only)' : ''}`;
+          if (Object.keys(toolfields).length > 0) {
+            logExtra += ` toolfields=${JSON.stringify(toolfields)}`;
+          }
         } catch (e) {
           // Not parseable JSON: forward untouched.
           logExtra = ' unparsed-passthrough';
@@ -140,6 +156,7 @@ function startServer(port, upstream, noStrip) {
       const stamp = new Date().toISOString();
       process.stdout.write(`${stamp} ${clientReq.method} ${clientReq.url}${logExtra}\n`);
 
+      const t0 = Date.now();
       const upstreamReq = requestFn({
         hostname: target.hostname,
         port: target.port || (secure ? 443 : 80),
@@ -148,10 +165,12 @@ function startServer(port, upstream, noStrip) {
         headers: fwdHeaders,
       });
       upstreamReq.on('response', (upstreamRes) => {
+        process.stdout.write(`${new Date().toISOString()} <- ${upstreamRes.statusCode} ${clientReq.url} ${Date.now() - t0}ms\n`);
         clientRes.writeHead(upstreamRes.statusCode, hopHeaders(upstreamRes.headers));
         upstreamRes.pipe(clientRes);
       });
       upstreamReq.on('error', (e) => {
+        process.stdout.write(`${new Date().toISOString()} <- ERR ${clientReq.url} ${Date.now() - t0}ms ${e.message}\n`);
         if (!clientRes.headersSent) {
           clientRes.writeHead(502, { 'content-type': 'application/json' });
         }
@@ -189,11 +208,23 @@ async function relaySelfTest() {
     req.on('end', () => {
       clearTimeout(timer);
       const body = Buffer.concat(chunks);
+      let maxUsesPresent = null;
+      let wsType = null;
+      try {
+        const seen = JSON.parse(body.toString('utf8'));
+        const ws = (seen.tools || []).find((x) => x && x.type === 'web_search_20250305');
+        if (ws) {
+          maxUsesPresent = Object.prototype.hasOwnProperty.call(ws, 'max_uses');
+          wsType = ws.type;
+        }
+      } catch (e) { /* nulls fail the asserts below honestly */ }
       res.writeHead(200, { 'content-type': 'application/json', connection: 'close' });
       res.end(JSON.stringify({
         got: body.length,
         declared,
         stripped: !body.toString('utf8').includes('pattern'),
+        maxUsesPresent,
+        wsType,
       }));
     });
   });
@@ -207,7 +238,10 @@ async function relaySelfTest() {
   const payload = JSON.stringify({
     model: 'x', max_tokens: 5,
     messages: [{ role: 'user', content: 'hi' }],
-    tools: [{ name: 't', input_schema: { type: 'object', properties: { p: { type: 'string', pattern: '^a+$' } } } }],
+    tools: [
+      { name: 't', input_schema: { type: 'object', properties: { p: { type: 'string', pattern: '^a+$' } } } },
+      { type: 'web_search_20250305', name: 'web_search', max_uses: 5 },
+    ],
   });
   const result = await new Promise((resolve, reject) => {
     const req = http.request({
@@ -226,6 +260,8 @@ async function relaySelfTest() {
   assert.strictEqual(result.status, 200, 'upstream answered 200 (body completed)');
   assert.strictEqual(result.body.got, result.body.declared, 'declared length matches received bytes');
   assert.strictEqual(result.body.stripped, true, 'pattern was stripped in flight');
+  assert.strictEqual(result.body.maxUsesPresent, false, 'max_uses stripped in flight');
+  assert.strictEqual(result.body.wsType, 'web_search_20250305', 'web_search type preserved in flight');
   await new Promise((r) => {
     let n = 0;
     const done = () => { if (++n === 2) r(); };
@@ -286,6 +322,20 @@ async function selfTest() {
     { ...rejected, description: 'Base directory' },
     'no-strip leaves the schema untouched',
   );
+  const wsBody = { tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 5 }] };
+  const wsOut = sanitizeTools(JSON.parse(JSON.stringify(wsBody)), false);
+  assert.strictEqual(wsOut.tools, 1);
+  assert.strictEqual('max_uses' in wsOut.body.tools[0], false, 'max_uses stripped from web_search');
+  assert.strictEqual(wsOut.body.tools[0].type, 'web_search_20250305', 'web_search type preserved');
+  assert.strictEqual(wsOut.toolfields.max_uses, 1, 'toolfields counted');
+  const oddBody = { tools: [{ name: 'WebSearch', max_uses: 3 }] };
+  const oddOut = sanitizeTools(JSON.parse(JSON.stringify(oddBody)), false);
+  assert.strictEqual('max_uses' in oddOut.body.tools[0], false, 'max_uses stripped whatever the shape');
+  assert.strictEqual(oddOut.body.tools[0].name, 'WebSearch', 'sibling fields preserved');
+  const wsFrozen = JSON.parse(JSON.stringify(wsBody));
+  const wsCounted = sanitizeTools(wsFrozen, true);
+  assert.strictEqual(wsCounted.toolfields.max_uses, 1, 'no-strip counts toolfields');
+  assert.strictEqual('max_uses' in wsFrozen.tools[0], true, 'no-strip leaves max_uses');
   process.stdout.write(`SELF-TEST PASS tools=1 stripped=${JSON.stringify(stripped)}\n`);
   await relaySelfTest();
 }

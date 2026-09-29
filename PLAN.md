@@ -90,6 +90,16 @@ Brief: PROJECT_BRIEF.md (Confirmed 2026-09-29).
   cover is a localhost relay inside `--self-test` (dummy upstream waits
   for the full body; ~2s red without the fix), not Pester — the
   round-trip suite only exercises shim health/settings, never relay.
+- D11: shim strips `max_uses` from tool definitions and logs upstream
+  status + ms per request (second log line; request line stays first so
+  hangs keep their evidence). `redacted_thinking` noise is left alone
+  deliberately: stripping response/history blocks would break the
+  signature chain for zero functional gain — the session round-trips
+  fine with it. Evidence 2026-09-29: `toolfields` fired 0 times and
+  every measured upstream answered 200 — the web-search 400/empty and
+  the classifier outage both live above the shim (Meta executor /
+  client flow). Strip kept as tested defense for the named field;
+  classifier workaround is leaving auto mode for manual approval.
 
 ## Red-drill evidence
 
@@ -102,6 +112,7 @@ Brief: PROJECT_BRIEF.md (Confirmed 2026-09-29).
 | vscode profile test | profile-path expectation to `does-not-exist-zzz` | yes, 14/15 exit 1 | yes, 15/15 (2026-09-29 resume) |
 | TUI text test | choice expectation to `WRONG-ON-PURPOSE` | yes, 8/9 exit 1 | yes, 9/9 |
 | shim relay test | fix line commented out | yes, 408 exit 1 (~2s) | yes, RELAY-TEST PASS |
+| max_uses assert | delete disabled | yes, true!==false exit 1 | yes, SELF-TEST PASS |
 
 ## Notes
 

@@ -35,3 +35,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   never came and every tool-carrying request hung until the client timed
   out (~6 min) and retried. `--self-test` now includes a localhost relay
   test pinning declared-vs-received lengths.
+- `muse-shim.js`: drop `max_uses` from tool definitions as defense (Meta
+  named the field in a web-search 400; the log shows it never arrives on
+  definitions, so live search failures are executor-side). The shim now
+  also logs the upstream status and round-trip time per request, so
+  endpoint errors are visible without touching bodies.

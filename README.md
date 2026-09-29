@@ -19,12 +19,13 @@ tool's `pattern`/`minLength`/`maxLength`) that Meta's strict validator
 rejects with `400 Invalid JSON schema`, failing every interactive turn.
 `muse-mode on` starts a localhost proxy (`muse-shim.js`, port 15555 unless
 `MUSE_SHIM_PORT` is set) and points Muse traffic at it; the shim strips
-those keywords from `tools[].input_schema`, forwards everything else
-byte-identical to Meta, and streams responses back. The CLI still validates
-tool inputs locally, so no constraint is lost. The shim logs one summary
-line per request (path, tool count, stripped keywords) — never bodies,
-headers, or keys. `muse-mode off` stops it; its log lives next to it as
-`muse-shim.log`.
+those keywords from `tools[].input_schema`, drops tool fields Meta rejects
+(`max_uses` on web search), re-declares the shortened body's length, and
+streams responses back. The CLI still validates tool inputs locally, so no
+constraint is lost. The shim logs a summary line per request (path, tool
+count, stripped keywords/fields) plus the upstream status line — never
+bodies, headers, or keys. `muse-mode off` stops it; its log lives next to
+it as `muse-shim.log`.
 
 ## Install
 
