@@ -5,9 +5,14 @@
 #                               No -Model: per-tier defaults (opus
 #                               muse-spark-1.3-contributor, sonnet
 #                               muse-spark-1.2-contributor, haiku
-#                               muse-spark-1.1). -Model <id>: pin every
-#                               tier to that id. Re-run to switch without
-#                               leaving Muse mode.
+#                               muse-spark-1.1, fable muse-spark-1.3 -
+#                               four distinct live ids) plus picker
+#                               NAME/DESCRIPTION labels so rows show Muse
+#                               names instead of "Custom <Tier> model",
+#                               plus a labeled custom row for the fifth
+#                               spark id (muse-spark-1.2).
+#                               -Model <id>: pin every tier to that id.
+#                               Re-run to switch without leaving Muse mode.
 #   muse-mode off     back to Anthropic (your claude.ai login)
 #   muse-mode status  which one new sessions will use
 #   muse-mode shim    whether the schema shim is running
@@ -59,12 +64,34 @@ if ($env:MUSE_MODE_TEST_SETTINGS) {
   $settingsPath = $env:MUSE_MODE_TEST_SETTINGS
   $savedPath = "$env:MUSE_MODE_TEST_SETTINGS.saved"
 }
-# Per-tier Muse defaults (all five chat-probed 2026-09-29): opus newest,
-# sonnet previous-gen contributor, haiku smallest. Distinct ids per tier so
-# the model picker shows three different rows instead of one id thrice.
+# Per-tier Muse defaults (live /v1/models 2026-09-29 lists 8 ids; the 5
+# spark chat-probed, the other 3 are image/voice/sam). Four tiers take four
+# distinct chat ids so no two picker rows share one: opus newest
+# contributor, sonnet previous-gen contributor, haiku smallest, fable
+# newest standard (most-capable tier). The fifth spark id rides the
+# picker's single custom row (ANTHROPIC_CUSTOM_MODEL_OPTION), so every
+# live chat model is one picker pick away.
 $defaultOpusModel = 'muse-spark-1.3-contributor'
 $defaultSonnetModel = 'muse-spark-1.2-contributor'
 $defaultHaikuModel = 'muse-spark-1.1'
+$defaultFableModel = 'muse-spark-1.3'
+$defaultSpareModel = 'muse-spark-1.2'
+# Picker labels: without NAME/DESCRIPTION the /model picker falls back to
+# the raw id plus "Custom <Tier> model", and the unpinned Fable tier leaks
+# the built-in Anthropic Fable row into Muse sessions. Honored since CLI
+# 2.1.118; ignored by older CLIs. SUPPORTED_CAPABILITIES skipped on
+# purpose: it has no effect behind ANTHROPIC_BASE_URL gateways (only on
+# Bedrock/Vertex/Foundry).
+$defaultOpusName = 'Muse Spark 1.3 Contributor'
+$defaultOpusDescription = 'Newest Muse model, contributor tier'
+$defaultSonnetName = 'Muse Spark 1.2 Contributor'
+$defaultSonnetDescription = 'Balanced Muse model, contributor tier'
+$defaultHaikuName = 'Muse Spark 1.1'
+$defaultHaikuDescription = 'Fast Muse model for quick tasks'
+$defaultFableName = 'Muse Spark 1.3'
+$defaultFableDescription = 'Most-capable Muse tier for hardest, longest-running tasks'
+$defaultSpareName = 'Muse Spark 1.2'
+$defaultSpareDescription = 'Standard Muse model, previous generation'
 # Legacy single-model default (the opus tier); status fallback only.
 $defaultMuseModel = $defaultOpusModel
 $helper = 'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ' +
@@ -74,25 +101,71 @@ $helper = 'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Fi
 $modelKeys = @(
   'ANTHROPIC_MODEL', 'ANTHROPIC_DEFAULT_OPUS_MODEL',
   'ANTHROPIC_DEFAULT_SONNET_MODEL', 'ANTHROPIC_DEFAULT_HAIKU_MODEL',
+  'ANTHROPIC_DEFAULT_FABLE_MODEL',
+  'ANTHROPIC_DEFAULT_OPUS_MODEL_NAME', 'ANTHROPIC_DEFAULT_OPUS_MODEL_DESCRIPTION',
+  'ANTHROPIC_DEFAULT_SONNET_MODEL_NAME', 'ANTHROPIC_DEFAULT_SONNET_MODEL_DESCRIPTION',
+  'ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME', 'ANTHROPIC_DEFAULT_HAIKU_MODEL_DESCRIPTION',
+  'ANTHROPIC_DEFAULT_FABLE_MODEL_NAME', 'ANTHROPIC_DEFAULT_FABLE_MODEL_DESCRIPTION',
+  'ANTHROPIC_CUSTOM_MODEL_OPTION', 'ANTHROPIC_CUSTOM_MODEL_OPTION_NAME',
+  'ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION',
   'CLAUDE_CODE_SUBAGENT_MODEL'
 )
 # The model-valued env map. A pinned <id> puts one id on every tier
-# (legacy -Model behavior); empty picks per-tier defaults.
+# (legacy -Model behavior, picker titles fall back to the id itself);
+# empty picks per-tier defaults with Muse picker labels.
 function Get-WantedMuseEnv([string]$Pinned) {
   $opus = $defaultOpusModel
   $sonnet = $defaultSonnetModel
   $haiku = $defaultHaikuModel
+  $fable = $defaultFableModel
+  $spare = $defaultSpareModel
+  $opusName = $defaultOpusName
+  $opusDescription = $defaultOpusDescription
+  $sonnetName = $defaultSonnetName
+  $sonnetDescription = $defaultSonnetDescription
+  $haikuName = $defaultHaikuName
+  $haikuDescription = $defaultHaikuDescription
+  $fableName = $defaultFableName
+  $fableDescription = $defaultFableDescription
+  $spareName = $defaultSpareName
+  $spareDescription = $defaultSpareDescription
   if (-not [string]::IsNullOrWhiteSpace($Pinned)) {
     $opus = $Pinned.Trim()
     $sonnet = $opus
     $haiku = $opus
+    $fable = $opus
+    $spare = $opus
+    $opusName = $opus
+    $sonnetName = $opus
+    $haikuName = $opus
+    $fableName = $opus
+    $spareName = $opus
+    $opusDescription = 'Pinned Muse model (muse-mode -Model)'
+    $sonnetDescription = $opusDescription
+    $haikuDescription = $opusDescription
+    $fableDescription = $opusDescription
+    $spareDescription = $opusDescription
   }
   return [ordered]@{
-    ANTHROPIC_MODEL                = $opus
-    ANTHROPIC_DEFAULT_OPUS_MODEL   = $opus
+    ANTHROPIC_MODEL = $opus
+    ANTHROPIC_DEFAULT_OPUS_MODEL = $opus
     ANTHROPIC_DEFAULT_SONNET_MODEL = $sonnet
-    ANTHROPIC_DEFAULT_HAIKU_MODEL  = $haiku
-    CLAUDE_CODE_SUBAGENT_MODEL     = $haiku
+    ANTHROPIC_DEFAULT_HAIKU_MODEL = $haiku
+    ANTHROPIC_DEFAULT_FABLE_MODEL = $fable
+    ANTHROPIC_DEFAULT_OPUS_MODEL_NAME = $opusName
+    ANTHROPIC_DEFAULT_OPUS_MODEL_DESCRIPTION = $opusDescription
+    ANTHROPIC_DEFAULT_SONNET_MODEL_NAME = $sonnetName
+    ANTHROPIC_DEFAULT_SONNET_MODEL_DESCRIPTION = $sonnetDescription
+    ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME = $haikuName
+    ANTHROPIC_DEFAULT_HAIKU_MODEL_DESCRIPTION = $haikuDescription
+    ANTHROPIC_DEFAULT_FABLE_MODEL_NAME = $fableName
+    ANTHROPIC_DEFAULT_FABLE_MODEL_DESCRIPTION = $fableDescription
+    ANTHROPIC_CUSTOM_MODEL_OPTION = $spare
+    ANTHROPIC_CUSTOM_MODEL_OPTION_NAME = $spareName
+    ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION = $spareDescription
+    # Subagents follow the main (opus) model, never the haiku tier: picking
+    # Default (currently <opus>) must not leak 1.1 traffic underneath.
+    CLAUDE_CODE_SUBAGENT_MODEL = $opus
   }
 }
 $museEnv = [ordered]@{
@@ -162,16 +235,18 @@ switch ($Mode) {
       $tierOpus = $null
       $tierSonnet = $null
       $tierHaiku = $null
+      $tierFable = $null
       if ($settings.Contains('env')) {
         $tierOpus = $settings.env['ANTHROPIC_DEFAULT_OPUS_MODEL']
         $tierSonnet = $settings.env['ANTHROPIC_DEFAULT_SONNET_MODEL']
         $tierHaiku = $settings.env['ANTHROPIC_DEFAULT_HAIKU_MODEL']
+        $tierFable = $settings.env['ANTHROPIC_DEFAULT_FABLE_MODEL']
       }
-      if ($tierOpus -and ($tierOpus -eq $tierSonnet) -and ($tierSonnet -eq $tierHaiku)) {
+      if ($tierOpus -and ($tierOpus -eq $tierSonnet) -and ($tierSonnet -eq $tierHaiku) -and ($tierHaiku -eq $tierFable)) {
         "Muse ($tierOpus) for new Claude Code sessions"
       }
-      elseif ($tierOpus -or $tierSonnet -or $tierHaiku) {
-        "Muse (opus $tierOpus, sonnet $tierSonnet, haiku $tierHaiku) for new Claude Code sessions"
+      elseif ($tierOpus -or $tierSonnet -or $tierHaiku -or $tierFable) {
+        "Muse (opus $tierOpus, sonnet $tierSonnet, haiku $tierHaiku, fable $tierFable) for new Claude Code sessions"
       }
       else { "Muse ($(Get-LiveMuseModel)) for new Claude Code sessions" }
     }
@@ -203,7 +278,7 @@ switch ($Mode) {
         "Muse model switched to $pinned. Open a new Claude Code session (VS Code: a new Claude tab) to use it."
       }
       else {
-        "Muse models switched to per-tier defaults (opus $defaultOpusModel, sonnet $defaultSonnetModel, haiku $defaultHaikuModel). Open a new Claude Code session (VS Code: a new Claude tab) to use them."
+        "Muse models switched to per-tier defaults (opus $defaultOpusModel, sonnet $defaultSonnetModel, haiku $defaultHaikuModel, fable $defaultFableModel). Open a new Claude Code session (VS Code: a new Claude tab) to use them."
       }
       break
     }
@@ -231,7 +306,7 @@ switch ($Mode) {
       "Muse on. Open a new Claude Code session (VS Code: a new Claude tab) to use $pinned."
     }
     else {
-      "Muse on (opus $defaultOpusModel, sonnet $defaultSonnetModel, haiku $defaultHaikuModel). Open a new Claude Code session (VS Code: a new Claude tab)."
+      "Muse on (opus $defaultOpusModel, sonnet $defaultSonnetModel, haiku $defaultHaikuModel, fable $defaultFableModel). Open a new Claude Code session (VS Code: a new Claude tab)."
     }
   }
   'off' {

@@ -22,11 +22,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `muse-claude.cmd` run.
 - Per-tier Muse defaults: bare `muse-mode on` maps opus
   `muse-spark-1.3-contributor`, sonnet `muse-spark-1.2-contributor`, haiku
-  `muse-spark-1.1` (all chat-probed live 2026-09-29; subagent follows
-  haiku), so the model picker shows three distinct rows instead of one id
-  thrice. `-Model <id>` still pins every tier to one id; `status` reports
-  the triple when tiers differ; `muse-claude.cmd` uses the same mapping
-  unless `MUSE_MODEL` pins it.
+  `muse-spark-1.1`, fable `muse-spark-1.3` (four distinct live `/v1/models`
+  chat ids; all chat-probed live 2026-09-29), with picker
+  `NAME`/`DESCRIPTION` labels per tier (honored since CLI 2.1.118) so rows
+  show Muse names instead of "Custom <Tier> model", plus the fifth spark
+  id (`muse-spark-1.2`) on the picker's custom row
+  (`ANTHROPIC_CUSTOM_MODEL_OPTION` + labels). Subagents follow the main
+  (opus) model, never the haiku tier. `-Model <id>` still pins every tier
+  to one id; `status` reports the tier set including fable;
+  `muse-claude.cmd` uses the same mapping unless `MUSE_MODEL` pins it.
 - Installer target menu (`-Target cli|vscode|other`): VS Code target adds
   a `"Muse"` terminal profile; other IDEs get PATH plus setup notes.
 - Installer TUI: ASCII banner with a step overview, a labeled target menu

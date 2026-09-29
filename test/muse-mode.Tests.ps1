@@ -52,21 +52,28 @@ Describe 'muse-mode round-trip' {
 
   It 'switches on with per-tier defaults and reports Muse' {
     (& $ps1 on) | Should Match 'Muse on'
-    (& $ps1 status) | Should Be 'Muse (opus muse-spark-1.3-contributor, sonnet muse-spark-1.2-contributor, haiku muse-spark-1.1) for new Claude Code sessions'
+    (& $ps1 status) | Should Be 'Muse (opus muse-spark-1.3-contributor, sonnet muse-spark-1.2-contributor, haiku muse-spark-1.1, fable muse-spark-1.3) for new Claude Code sessions'
     $live = Get-Content -Raw -LiteralPath $settings | ConvertFrom-Json
     $live.model | Should Be 'muse-spark-1.3-contributor'
     $live.env.ANTHROPIC_MODEL | Should Be 'muse-spark-1.3-contributor'
     $live.env.ANTHROPIC_DEFAULT_OPUS_MODEL | Should Be 'muse-spark-1.3-contributor'
     $live.env.ANTHROPIC_DEFAULT_SONNET_MODEL | Should Be 'muse-spark-1.2-contributor'
     $live.env.ANTHROPIC_DEFAULT_HAIKU_MODEL | Should Be 'muse-spark-1.1'
-    $live.env.CLAUDE_CODE_SUBAGENT_MODEL | Should Be 'muse-spark-1.1'
+    $live.env.ANTHROPIC_DEFAULT_FABLE_MODEL | Should Be 'muse-spark-1.3'
+    $live.env.ANTHROPIC_DEFAULT_OPUS_MODEL_NAME | Should Be 'Muse Spark 1.3 Contributor'
+    $live.env.ANTHROPIC_DEFAULT_OPUS_MODEL_DESCRIPTION | Should Match 'Newest Muse model'
+    $live.env.ANTHROPIC_DEFAULT_SONNET_MODEL_NAME | Should Be 'Muse Spark 1.2 Contributor'
+    $live.env.ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME | Should Be 'Muse Spark 1.1'
+    $live.env.ANTHROPIC_DEFAULT_FABLE_MODEL_NAME | Should Be 'Muse Spark 1.3'
+    $live.env.ANTHROPIC_DEFAULT_FABLE_MODEL_DESCRIPTION | Should Match 'Most-capable'
+    $live.env.CLAUDE_CODE_SUBAGENT_MODEL | Should Be 'muse-spark-1.3-contributor'
   }
 
   It 're-on with no flag converges pinned tiers to per-tier defaults' {
     (& $ps1 on -Model test-model-a) | Should Match 'Muse model switched to test-model-a'
     (& $ps1 status) | Should Be 'Muse (test-model-a) for new Claude Code sessions'
     (& $ps1 on) | Should Match 'per-tier defaults'
-    (& $ps1 status) | Should Be 'Muse (opus muse-spark-1.3-contributor, sonnet muse-spark-1.2-contributor, haiku muse-spark-1.1) for new Claude Code sessions'
+    (& $ps1 status) | Should Be 'Muse (opus muse-spark-1.3-contributor, sonnet muse-spark-1.2-contributor, haiku muse-spark-1.1, fable muse-spark-1.3) for new Claude Code sessions'
   }
 
   It 'points the base URL at the running shim' {
@@ -112,6 +119,12 @@ Describe 'muse-mode model flag' {
     $live.model | Should Be 'test-model-a'
     $live.env.ANTHROPIC_MODEL | Should Be 'test-model-a'
     $live.env.ANTHROPIC_DEFAULT_HAIKU_MODEL | Should Be 'test-model-a'
+    $live.env.ANTHROPIC_DEFAULT_FABLE_MODEL | Should Be 'test-model-a'
+    $live.env.ANTHROPIC_CUSTOM_MODEL_OPTION | Should Be 'test-model-a'
+    $live.env.ANTHROPIC_CUSTOM_MODEL_OPTION_NAME | Should Be 'test-model-a'
+    $live.env.ANTHROPIC_DEFAULT_OPUS_MODEL_NAME | Should Be 'test-model-a'
+    $live.env.ANTHROPIC_DEFAULT_FABLE_MODEL_DESCRIPTION | Should Match 'Pinned Muse model'
+    $live.env.CLAUDE_CODE_SUBAGENT_MODEL | Should Be 'test-model-a'
   }
 
   It 're-on with another -Model switches without leaving Muse mode' {
@@ -120,6 +133,8 @@ Describe 'muse-mode model flag' {
     $live = Get-Content -Raw -LiteralPath $settings2 | ConvertFrom-Json
     $live.model | Should Be 'test-model-b'
     $live.env.ANTHROPIC_DEFAULT_SONNET_MODEL | Should Be 'test-model-b'
+    $live.env.ANTHROPIC_CUSTOM_MODEL_OPTION | Should Be 'test-model-b'
+    $live.env.CLAUDE_CODE_SUBAGENT_MODEL | Should Be 'test-model-b'
   }
 
   It 're-on with the same model is a no-op' {

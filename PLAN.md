@@ -123,15 +123,22 @@ Brief: PROJECT_BRIEF.md (Confirmed 2026-09-29).
   (fresh session: chat, tools, Bash) passed clean with zero noise
   lines — Meta has no echo requirement, filter stands.
 - D15: per-tier Muse model defaults (picker showed one id thrice because
-  muse-mode set every tier slot to `muse-spark-1.3-contributor`).
-  `muse-mode on` with no flag now maps opus `muse-spark-1.3-contributor`,
-  sonnet `muse-spark-1.2-contributor`, haiku `muse-spark-1.1` (the /v1/models
-  catalog 2026-09-29 lists 8 ids; the 3 non-spark are image/voice/sam, the
-  5 spark all answered a live chat probe; sonnet takes previous-gen
-  contributor, haiku the smallest, subagent follows haiku). `-Model <id>`
-  still pins every tier to one id. Same mapping in `muse-claude.cmd` via
-  MUSE_MODEL default branches. `status` prints the per-tier triple when
-  tiers differ. `modelPricing` cost fix resolved by D16 below.
+  muse-mode set every tier slot to `muse-spark-1.3-contributor`, then
+  showed "Custom <Tier> model" rows plus a leaked Anthropic Fable row
+  because NAME/DESCRIPTION labels and the CLI's Fable tier were never
+  wired). `muse-mode on` with no flag now maps opus
+  `muse-spark-1.3-contributor`, sonnet `muse-spark-1.2-contributor`, haiku
+  `muse-spark-1.1`, fable `muse-spark-1.3` (four distinct live
+  /v1/models chat ids 2026-09-29; image/voice/sam never picker
+  candidates), each with NAME/DESCRIPTION picker labels (honored since
+  CLI 2.1.118; SUPPORTED_CAPABILITIES skipped — no effect behind
+  ANTHROPIC_BASE_URL gateways), plus the fifth spark id
+  (`muse-spark-1.2`) on the picker's custom row
+  (ANTHROPIC_CUSTOM_MODEL_OPTION + labels). Subagents follow the main
+  (opus) model so Default on opus never leaks haiku-tier traffic.
+  `-Model <id>` still pins every tier to one id. Same mapping in
+  `muse-claude.cmd` via MUSE_MODEL default branches. `status` prints the
+  tier set including fable. `modelPricing` cost fix resolved by D16 below.
 - D16: Muse usage pricing (panel said "unknown models", $4.05 fallback).
   Meta rate card 2026-09-29: contributor (1.3/1.2-contributor) in $0.10 /
   out $0.20 / cached $0.002; standard (1.3, 1.2, 1.1) in $1.25 / out
@@ -169,6 +176,7 @@ Brief: PROJECT_BRIEF.md (Confirmed 2026-09-29).
 | thinking drop | delete disabled | yes, true!==false exit 1 | yes, SELF-TEST PASS |
 | SSE thinking filter | branch disabled | yes, true!==false exit 1 | yes, SELF-TEST PASS |
 | muse pricing rates | expectation to `999.999` | yes, 29/30 exit 1 | yes, 30/30 |
+| D15 fable/subagent keys | deleted ANTHROPIC_DEFAULT_FABLE_MODEL from sandbox settings copy | yes, assertion tripped on missing key | yes, re-on restored muse-spark-1.3; Pester 30/30 |
 
 ## Notes
 

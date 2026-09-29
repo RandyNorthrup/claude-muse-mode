@@ -5,7 +5,7 @@ one command. No affiliation with or endorsement by Meta.
 
 ## What this is
 
-- `muse-mode on` — new Claude Code sessions use Muse via Meta's Anthropic-compatible endpoint, with per-tier defaults (opus `muse-spark-1.3-contributor`, sonnet `muse-spark-1.2-contributor`, haiku `muse-spark-1.1`), so the model picker shows three distinct rows.
+- `muse-mode on` — new Claude Code sessions use Muse via Meta's Anthropic-compatible endpoint, with per-tier defaults (opus `muse-spark-1.3-contributor`, sonnet `muse-spark-1.2-contributor`, haiku `muse-spark-1.1`, fable `muse-spark-1.3` — four distinct live chat ids), plus picker `NAME`/`DESCRIPTION` labels so rows show Muse names instead of "Custom <Tier> model", plus the fifth spark id (`muse-spark-1.2`) on the picker's custom row. Subagents follow the main (opus) model.
 - `muse-mode off` — back to Anthropic (your claude.ai login). Whatever model/env settings you had are restored, and the shim is stopped.
 - `muse-mode status` — which one new sessions will use.
 - `muse-mode shim` — whether the schema shim is running.
@@ -61,7 +61,7 @@ declining just keeps fallback pricing. It writes machine-local
 afterwards, then:
 
 ```powershell
-muse-mode on                    # per-tier defaults (opus 1.3-contributor, sonnet 1.2-contributor, haiku 1.1)
+muse-mode on                    # per-tier defaults (opus 1.3-contributor, sonnet 1.2-contributor, haiku 1.1, fable 1.3; spare 1.2 on custom row)
 muse-mode on -Model <other-id>  # pin every tier to one id, without leaving Muse mode
 ```
 
