@@ -100,6 +100,41 @@ Brief: PROJECT_BRIEF.md (Confirmed 2026-09-29).
   the classifier outage both live above the shim (Meta executor /
   client flow). Strip kept as tested defense for the named field;
   classifier workaround is leaving auto mode for manual approval.
+- D12: shim drops web-search tools (Meta executor proven useless:
+  max_uses 400, then empty; model demonstrably prefers WebFetch).
+  Restorable via `MUSE_SHIM_KEEP_WEB_SEARCH=1`. Request lines now carry
+  top-level param names (never values) to answer the thinking question
+  with data: if `thinking` is requested, strip the request param; if
+  Meta injects it unprompted, silencing needs response surgery (owner
+  call — risky).
+- D13: shim drops the `thinking` request param (log proved it requested;
+  Meta's redacted answers rendered as client noise). Restorable via
+  `MUSE_SHIM_KEEP_THINKING=1`. Cost/benefit: possible reasoning-quality
+  loss for a quiet client — owner judges live, revert is one deploy.
+  Open: whether the Bash classifier outage clears with it (if the
+  classifier choked on redacted blocks) or needs its own probe
+  (timestamp-correlated Bash attempt vs log).
+- D14: shim filters thinking/redacted_thinking blocks out of responses
+  (SSE event filter + JSON re-pack; Meta emits them even with no
+  `thinking` param, proven by fresh-session turn 1 with
+  `dropped_params=[thinking]`). Fail-open everywhere; streaming
+  preserved; same `MUSE_SHIM_KEEP_THINKING=1` flag gates request and
+  response handling together. Gate result: the live 3-turn gate
+  (fresh session: chat, tools, Bash) passed clean with zero noise
+  lines — Meta has no echo requirement, filter stands.
+- D15: per-tier Muse model defaults (picker showed one id thrice because
+  muse-mode set every tier slot to `muse-spark-1.3-contributor`).
+  `muse-mode on` with no flag now maps opus `muse-spark-1.3-contributor`,
+  sonnet `muse-spark-1.2-contributor`, haiku `muse-spark-1.1` (the /v1/models
+  catalog 2026-09-29 lists 8 ids; the 3 non-spark are image/voice/sam, the
+  5 spark all answered a live chat probe; sonnet takes previous-gen
+  contributor, haiku the smallest, subagent follows haiku). `-Model <id>`
+  still pins every tier to one id. Same mapping in `muse-claude.cmd` via
+  MUSE_MODEL default branches. `status` prints the per-tier triple when
+  tiers differ. Open: `modelPricing` managed-settings overrides for Muse
+  ids so /cost stops saying "unknown models" — needs Meta per-Mtok rates
+  and a managed-settings.json write (user-level settings.json is ignored
+  by design; warned: needs pricing page + elevation decision).
 
 ## Red-drill evidence
 
@@ -113,6 +148,9 @@ Brief: PROJECT_BRIEF.md (Confirmed 2026-09-29).
 | TUI text test | choice expectation to `WRONG-ON-PURPOSE` | yes, 8/9 exit 1 | yes, 9/9 |
 | shim relay test | fix line commented out | yes, 408 exit 1 (~2s) | yes, RELAY-TEST PASS |
 | max_uses assert | delete disabled | yes, true!==false exit 1 | yes, SELF-TEST PASS |
+| web_search drop | drop disabled | yes, 1!==0 exit 1 | yes, SELF-TEST PASS |
+| thinking drop | delete disabled | yes, true!==false exit 1 | yes, SELF-TEST PASS |
+| SSE thinking filter | branch disabled | yes, true!==false exit 1 | yes, SELF-TEST PASS |
 
 ## Notes
 

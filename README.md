@@ -5,7 +5,7 @@ one command. No affiliation with or endorsement by Meta.
 
 ## What this is
 
-- `muse-mode on` — new Claude Code sessions use Muse (`muse-spark-1.3-contributor`) via Meta's Anthropic-compatible endpoint.
+- `muse-mode on` — new Claude Code sessions use Muse via Meta's Anthropic-compatible endpoint, with per-tier defaults (opus `muse-spark-1.3-contributor`, sonnet `muse-spark-1.2-contributor`, haiku `muse-spark-1.1`), so the model picker shows three distinct rows.
 - `muse-mode off` — back to Anthropic (your claude.ai login). Whatever model/env settings you had are restored, and the shim is stopped.
 - `muse-mode status` — which one new sessions will use.
 - `muse-mode shim` — whether the schema shim is running.
@@ -20,12 +20,21 @@ rejects with `400 Invalid JSON schema`, failing every interactive turn.
 `muse-mode on` starts a localhost proxy (`muse-shim.js`, port 15555 unless
 `MUSE_SHIM_PORT` is set) and points Muse traffic at it; the shim strips
 those keywords from `tools[].input_schema`, drops tool fields Meta rejects
-(`max_uses` on web search), re-declares the shortened body's length, and
-streams responses back. The CLI still validates tool inputs locally, so no
-constraint is lost. The shim logs a summary line per request (path, tool
-count, stripped keywords/fields) plus the upstream status line — never
-bodies, headers, or keys. `muse-mode off` stops it; its log lives next to
-it as `muse-shim.log`.
+(`max_uses`), re-declares the shortened body's length, and streams
+responses back. Meta's web-search execution is broken (it 400s, then
+returns empty results), so the shim also drops the web-search tool and
+lets the model fall through to working tools; set
+`MUSE_SHIM_KEEP_WEB_SEARCH=1` and restart the shim to keep it. It also
+drops the `thinking` request param (Meta answers with redacted blocks
+the client can only render as noise); set `MUSE_SHIM_KEEP_THINKING=1`
+and restart the shim to keep it. Since Meta also emits redacted blocks
+unprompted, the shim filters thinking blocks out of responses too (SSE
+streams stay streaming; single-shot JSON bodies are re-packed). The CLI
+still validates tool inputs locally, so no constraint is lost. The shim
+logs a summary line per request (path, tool count, stripped
+keywords/fields, request param names) plus the upstream status line —
+never bodies, headers, or keys. `muse-mode off` stops it; its log lives
+next to it as `muse-shim.log`.
 
 ## Install
 
@@ -49,8 +58,8 @@ the install directory to your user PATH. Open a **new** terminal
 afterwards, then:
 
 ```powershell
-muse-mode on                  # 1.3-contributor, the default
-muse-mode on -Model <other-id>  # switch models without leaving Muse mode
+muse-mode on                    # per-tier defaults (opus 1.3-contributor, sonnet 1.2-contributor, haiku 1.1)
+muse-mode on -Model <other-id>  # pin every tier to one id, without leaving Muse mode
 ```
 
 Then open a new Claude Code session (a new Claude tab in VS Code) to use Muse.
@@ -58,7 +67,7 @@ Then open a new Claude Code session (a new Claude tab in VS Code) to use Muse.
 Options: `-Target <cli|vscode|other>` to skip the menu (required for
 non-interactive runs), `-InstallDir <path>` to choose the target
 directory, `-NoPathUpdate` to skip the PATH change, `-Force` to replace a
-stored key without confirming. `MUSE_MODEL` overrides the model for a
+stored key without confirming. `MUSE_MODEL` pins every tier to one id for a
 single `muse-claude.cmd` run.
 
 ## Uninstall

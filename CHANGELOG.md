@@ -20,6 +20,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - `muse-mode on -Model <id>`: switch Muse models without leaving Muse
   mode (default `muse-spark-1.3-contributor`); `MUSE_MODEL` overrides one
   `muse-claude.cmd` run.
+- Per-tier Muse defaults: bare `muse-mode on` maps opus
+  `muse-spark-1.3-contributor`, sonnet `muse-spark-1.2-contributor`, haiku
+  `muse-spark-1.1` (all chat-probed live 2026-09-29; subagent follows
+  haiku), so the model picker shows three distinct rows instead of one id
+  thrice. `-Model <id>` still pins every tier to one id; `status` reports
+  the triple when tiers differ; `muse-claude.cmd` uses the same mapping
+  unless `MUSE_MODEL` pins it.
 - Installer target menu (`-Target cli|vscode|other`): VS Code target adds
   a `"Muse"` terminal profile; other IDEs get PATH plus setup notes.
 - Installer TUI: ASCII banner with a step overview, a labeled target menu
@@ -40,3 +47,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   definitions, so live search failures are executor-side). The shim now
   also logs the upstream status and round-trip time per request, so
   endpoint errors are visible without touching bodies.
+- `muse-shim.js`: drop the web-search tool from definitions (Meta's
+  executor 400s then returns empty results; the model falls through to
+  WebFetch). Restorable with `MUSE_SHIM_KEEP_WEB_SEARCH=1`. Request log
+  lines now include top-level param names (never values) for diagnosis.
+- `muse-shim.js`: drop the `thinking` request param (Meta answers with
+  redacted blocks the client renders as `Unsupported content type`
+  noise). Restorable with `MUSE_SHIM_KEEP_THINKING=1`.
+- `muse-shim.js`: filter thinking/redacted_thinking blocks out of
+  responses (Meta emits them even unprompted). SSE stays streaming;
+  JSON bodies are re-packed with corrected lengths. Fail-open: anything
+  unrecognized passes through untouched.

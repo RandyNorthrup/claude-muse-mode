@@ -48,9 +48,23 @@ Describe 'muse-mode round-trip' {
     (& $ps1 status) | Should Be 'Anthropic for new Claude Code sessions'
   }
 
-  It 'switches on and reports Muse' {
+  It 'switches on with per-tier defaults and reports Muse' {
     (& $ps1 on) | Should Match 'Muse on'
-    (& $ps1 status) | Should Be 'Muse (muse-spark-1.3-contributor) for new Claude Code sessions'
+    (& $ps1 status) | Should Be 'Muse (opus muse-spark-1.3-contributor, sonnet muse-spark-1.2-contributor, haiku muse-spark-1.1) for new Claude Code sessions'
+    $live = Get-Content -Raw -LiteralPath $settings | ConvertFrom-Json
+    $live.model | Should Be 'muse-spark-1.3-contributor'
+    $live.env.ANTHROPIC_MODEL | Should Be 'muse-spark-1.3-contributor'
+    $live.env.ANTHROPIC_DEFAULT_OPUS_MODEL | Should Be 'muse-spark-1.3-contributor'
+    $live.env.ANTHROPIC_DEFAULT_SONNET_MODEL | Should Be 'muse-spark-1.2-contributor'
+    $live.env.ANTHROPIC_DEFAULT_HAIKU_MODEL | Should Be 'muse-spark-1.1'
+    $live.env.CLAUDE_CODE_SUBAGENT_MODEL | Should Be 'muse-spark-1.1'
+  }
+
+  It 're-on with no flag converges pinned tiers to per-tier defaults' {
+    (& $ps1 on -Model test-model-a) | Should Match 'Muse model switched to test-model-a'
+    (& $ps1 status) | Should Be 'Muse (test-model-a) for new Claude Code sessions'
+    (& $ps1 on) | Should Match 'per-tier defaults'
+    (& $ps1 status) | Should Be 'Muse (opus muse-spark-1.3-contributor, sonnet muse-spark-1.2-contributor, haiku muse-spark-1.1) for new Claude Code sessions'
   }
 
   It 'points the base URL at the running shim' {

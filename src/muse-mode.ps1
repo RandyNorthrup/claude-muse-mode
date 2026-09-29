@@ -1,10 +1,13 @@
 # Switches Claude Code (CLI and the VS Code panel) between Anthropic and
 # Meta's Muse Model API by editing ~/.claude/settings.json. New sessions pick
 # the change up; running ones keep what they started with.
-#   muse-mode on [-Model <id>]  Muse (Meta's Anthropic-compatible endpoint,
-#                               default model muse-spark-1.3-contributor).
-#                               Re-run with another -Model to switch models
-#                               without leaving Muse mode.
+#   muse-mode on [-Model <id>]  Muse (Meta's Anthropic-compatible endpoint).
+#                               No -Model: per-tier defaults (opus
+#                               muse-spark-1.3-contributor, sonnet
+#                               muse-spark-1.2-contributor, haiku
+#                               muse-spark-1.1). -Model <id>: pin every
+#                               tier to that id. Re-run to switch without
+#                               leaving Muse mode.
 #   muse-mode off     back to Anthropic (your claude.ai login)
 #   muse-mode status  which one new sessions will use
 #   muse-mode shim    whether the schema shim is running
@@ -56,8 +59,14 @@ if ($env:MUSE_MODE_TEST_SETTINGS) {
   $settingsPath = $env:MUSE_MODE_TEST_SETTINGS
   $savedPath = "$env:MUSE_MODE_TEST_SETTINGS.saved"
 }
-$defaultMuseModel = 'muse-spark-1.3-contributor'
-$museModel = $defaultMuseModel
+# Per-tier Muse defaults (all five chat-probed 2026-09-29): opus newest,
+# sonnet previous-gen contributor, haiku smallest. Distinct ids per tier so
+# the model picker shows three different rows instead of one id thrice.
+$defaultOpusModel = 'muse-spark-1.3-contributor'
+$defaultSonnetModel = 'muse-spark-1.2-contributor'
+$defaultHaikuModel = 'muse-spark-1.1'
+# Legacy single-model default (the opus tier); status fallback only.
+$defaultMuseModel = $defaultOpusModel
 $helper = 'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ' +
   ((Join-Path $PSScriptRoot 'key.ps1') -replace '\\', '/')
 # Env keys that carry the model id (everything model-valued; BASE_URL and
@@ -67,15 +76,31 @@ $modelKeys = @(
   'ANTHROPIC_DEFAULT_SONNET_MODEL', 'ANTHROPIC_DEFAULT_HAIKU_MODEL',
   'CLAUDE_CODE_SUBAGENT_MODEL'
 )
-$museEnv = [ordered]@{
-  ANTHROPIC_BASE_URL             = 'https://api.meta.ai'
-  ANTHROPIC_MODEL                = $museModel
-  ANTHROPIC_DEFAULT_OPUS_MODEL   = $museModel
-  ANTHROPIC_DEFAULT_SONNET_MODEL = $museModel
-  ANTHROPIC_DEFAULT_HAIKU_MODEL  = $museModel
-  CLAUDE_CODE_SUBAGENT_MODEL     = $museModel
-  ENABLE_TOOL_SEARCH             = 'true'
+# The model-valued env map. A pinned <id> puts one id on every tier
+# (legacy -Model behavior); empty picks per-tier defaults.
+function Get-WantedMuseEnv([string]$Pinned) {
+  $opus = $defaultOpusModel
+  $sonnet = $defaultSonnetModel
+  $haiku = $defaultHaikuModel
+  if (-not [string]::IsNullOrWhiteSpace($Pinned)) {
+    $opus = $Pinned.Trim()
+    $sonnet = $opus
+    $haiku = $opus
+  }
+  return [ordered]@{
+    ANTHROPIC_MODEL                = $opus
+    ANTHROPIC_DEFAULT_OPUS_MODEL   = $opus
+    ANTHROPIC_DEFAULT_SONNET_MODEL = $sonnet
+    ANTHROPIC_DEFAULT_HAIKU_MODEL  = $haiku
+    CLAUDE_CODE_SUBAGENT_MODEL     = $haiku
+  }
 }
+$museEnv = [ordered]@{
+  ANTHROPIC_BASE_URL = 'https://api.meta.ai'
+  ENABLE_TOOL_SEARCH = 'true'
+}
+$wantedDefault = Get-WantedMuseEnv ''
+foreach ($keyName in $wantedDefault.Keys) { $museEnv[$keyName] = $wantedDefault[$keyName] }
 
 $settings = Read-JsonAsHashtable $settingsPath
 $isOn = $settings.apiKeyHelper -eq $helper
@@ -133,20 +158,53 @@ function Get-LiveMuseModel {
 
 switch ($Mode) {
   'status' {
-    if ($isOn) { "Muse ($(Get-LiveMuseModel)) for new Claude Code sessions" } else { 'Anthropic for new Claude Code sessions' }
+    if ($isOn) {
+      $tierOpus = $null
+      $tierSonnet = $null
+      $tierHaiku = $null
+      if ($settings.Contains('env')) {
+        $tierOpus = $settings.env['ANTHROPIC_DEFAULT_OPUS_MODEL']
+        $tierSonnet = $settings.env['ANTHROPIC_DEFAULT_SONNET_MODEL']
+        $tierHaiku = $settings.env['ANTHROPIC_DEFAULT_HAIKU_MODEL']
+      }
+      if ($tierOpus -and ($tierOpus -eq $tierSonnet) -and ($tierSonnet -eq $tierHaiku)) {
+        "Muse ($tierOpus) for new Claude Code sessions"
+      }
+      elseif ($tierOpus -or $tierSonnet -or $tierHaiku) {
+        "Muse (opus $tierOpus, sonnet $tierSonnet, haiku $tierHaiku) for new Claude Code sessions"
+      }
+      else { "Muse ($(Get-LiveMuseModel)) for new Claude Code sessions" }
+    }
+    else { 'Anthropic for new Claude Code sessions' }
   }
   'on' {
-    if ([string]::IsNullOrWhiteSpace($Model)) { $wanted = $defaultMuseModel }
-    else { $wanted = $Model.Trim() }
+    $pinned = ''
+    if (-not [string]::IsNullOrWhiteSpace($Model)) { $pinned = $Model.Trim() }
+    $wantedEnv = Get-WantedMuseEnv $pinned
+    $wantedMain = $wantedEnv['ANTHROPIC_MODEL']
     if ($isOn) {
-      if ($settings.model -eq $wanted) { 'Already on Muse.'; break }
-      # Already on Muse with another model: switch the model-valued keys and
-      # settings.model only. The pre-Muse backup stays untouched for `off`.
+      $same = ($settings.model -eq $wantedMain)
+      if ($same) {
+        if ($settings.Contains('env')) {
+          foreach ($name in $modelKeys) {
+            if ($settings.env[$name] -ne $wantedEnv[$name]) { $same = $false; break }
+          }
+        }
+        else { $same = $false }
+      }
+      if ($same) { 'Already on Muse.'; break }
+      # Already on Muse: switch the model-valued keys and settings.model
+      # only. The pre-Muse backup stays untouched for `off`.
       if (-not $settings.Contains('env')) { $settings.env = [ordered]@{} }
-      foreach ($name in $modelKeys) { $settings.env[$name] = $wanted }
-      $settings.model = $wanted
+      foreach ($name in $modelKeys) { $settings.env[$name] = $wantedEnv[$name] }
+      $settings.model = $wantedMain
       Save-SettingFile
-      "Muse model switched to $wanted. Open a new Claude Code session (VS Code: a new Claude tab) to use it."
+      if ($pinned -ne '') {
+        "Muse model switched to $pinned. Open a new Claude Code session (VS Code: a new Claude tab) to use it."
+      }
+      else {
+        "Muse models switched to per-tier defaults (opus $defaultOpusModel, sonnet $defaultSonnetModel, haiku $defaultHaikuModel). Open a new Claude Code session (VS Code: a new Claude tab) to use them."
+      }
       break
     }
     if ($settings.Contains('apiKeyHelper')) {
@@ -157,7 +215,7 @@ switch ($Mode) {
     $shimUrl = Start-Shim
     if ([string]::IsNullOrWhiteSpace($shimUrl)) { throw 'Schema shim did not return a URL.' }
     $museEnv['ANTHROPIC_BASE_URL'] = $shimUrl
-    foreach ($name in $modelKeys) { $museEnv[$name] = $wanted }
+    foreach ($name in $modelKeys) { $museEnv[$name] = $wantedEnv[$name] }
     # What "off" puts back: the model choice and any env values Muse replaces.
     $saved = [ordered]@{ model = $settings.model; env = [ordered]@{} }
     if (-not $settings.Contains('env')) { $settings.env = [ordered]@{} }
@@ -166,10 +224,15 @@ switch ($Mode) {
       $settings.env[$name] = $museEnv[$name]
     }
     Write-Utf8NoBom $savedPath ($saved | ConvertTo-Json -Depth 8)
-    $settings.model = $wanted
+    $settings.model = $wantedMain
     $settings.apiKeyHelper = $helper
     Save-SettingFile
-    "Muse on. Open a new Claude Code session (VS Code: a new Claude tab) to use $wanted."
+    if ($pinned -ne '') {
+      "Muse on. Open a new Claude Code session (VS Code: a new Claude tab) to use $pinned."
+    }
+    else {
+      "Muse on (opus $defaultOpusModel, sonnet $defaultSonnetModel, haiku $defaultHaikuModel). Open a new Claude Code session (VS Code: a new Claude tab)."
+    }
   }
   'off' {
     if (-not $isOn) { 'Already on Anthropic.'; break }
