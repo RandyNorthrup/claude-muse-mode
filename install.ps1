@@ -531,9 +531,10 @@ if ($null -ne $ApiKey) {
 }
 
 $helperPath = ((Join-Path $InstallDir 'key.ps1') -replace '\\', '/')
-$settingsJson = "{`r`n  `"apiKeyHelper`": `"powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $helperPath`"`r`n}`r`n"
-[System.IO.File]::WriteAllText(
-  (Join-Path $InstallDir 'settings.json'), $settingsJson, (New-Object System.Text.UTF8Encoding $false))
+# Quote the helper path: install dirs under usernames with spaces break an
+# unquoted -File path. Built via ConvertTo-Json so the inner quotes stay valid JSON.
+$installSettings = [ordered]@{ apiKeyHelper = 'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + $helperPath + '"' }
+Write-Utf8NoBom (Join-Path $InstallDir 'settings.json') ($installSettings | ConvertTo-Json -Depth 8)
 Write-Output 'Wrote settings.json with a machine-local apiKeyHelper path.'
 
 if (-not $NoPathUpdate) {

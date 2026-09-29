@@ -94,8 +94,12 @@ $defaultSpareName = 'Muse Spark 1.2'
 $defaultSpareDescription = 'Standard Muse model, previous generation'
 # Legacy single-model default (the opus tier); status fallback only.
 $defaultMuseModel = $defaultOpusModel
-$helper = 'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ' +
-  ((Join-Path $PSScriptRoot 'key.ps1') -replace '\\', '/')
+# Quote the helper path: install dirs under usernames with spaces break an
+# unquoted -File path. Legacy installs wrote it unquoted; both count as on
+# so `status`/`off` keep working, and the next `on` migrates to quoted.
+$helperPath = ((Join-Path $PSScriptRoot 'key.ps1') -replace '\\', '/')
+$helper = 'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + $helperPath + '"'
+$helperLegacy = 'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ' + $helperPath
 # Env keys that carry the model id (everything model-valued; BASE_URL and
 # ENABLE_TOOL_SEARCH are set independently).
 $modelKeys = @(
@@ -176,7 +180,7 @@ $wantedDefault = Get-WantedMuseEnv ''
 foreach ($keyName in $wantedDefault.Keys) { $museEnv[$keyName] = $wantedDefault[$keyName] }
 
 $settings = Read-JsonAsHashtable $settingsPath
-$isOn = $settings.apiKeyHelper -eq $helper
+$isOn = ($settings.apiKeyHelper -eq $helper) -or ($settings.apiKeyHelper -eq $helperLegacy)
 
 function Save-SettingFile {
   $backup = "$settingsPath.bak-muse-mode"
@@ -267,12 +271,21 @@ switch ($Mode) {
         }
         else { $same = $false }
       }
-      if ($same) { 'Already on Muse.'; break }
+      if ($same) {
+        # Migrate legacy unquoted installs even when the model is unchanged.
+        if ($settings.apiKeyHelper -ne $helper) {
+          $settings.apiKeyHelper = $helper
+          Save-SettingFile
+        }
+        'Already on Muse.'; break
+      }
       # Already on Muse: switch the model-valued keys and settings.model
-      # only. The pre-Muse backup stays untouched for `off`.
+      # only. The pre-Muse backup stays untouched for `off`. Also migrates
+      # legacy unquoted apiKeyHelper installs to the quoted form.
       if (-not $settings.Contains('env')) { $settings.env = [ordered]@{} }
       foreach ($name in $modelKeys) { $settings.env[$name] = $wantedEnv[$name] }
       $settings.model = $wantedMain
+      $settings.apiKeyHelper = $helper
       Save-SettingFile
       if ($pinned -ne '') {
         "Muse model switched to $pinned. Open a new Claude Code session (VS Code: a new Claude tab) to use it."

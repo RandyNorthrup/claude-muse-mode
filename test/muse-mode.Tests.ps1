@@ -54,6 +54,18 @@ Describe 'muse-mode round-trip' {
     (& $ps1 status) | Should -Be 'Muse (opus muse-spark-1.3-contributor, sonnet muse-spark-1.2-contributor, haiku muse-spark-1.1, fable muse-spark-1.3) for new Claude Code sessions'
   }
 
+  It 'writes a quoted helper path and migrates legacy unquoted installs' {
+    $live = Get-Content -Raw -LiteralPath $settings | ConvertFrom-Json
+    # Quoted -File path: install dirs under usernames with spaces need it.
+    $live.apiKeyHelper | Should -Match '\-File ".*key\.ps1"'
+    # Legacy unquoted installs still count as on and migrate on re-on.
+    $raw = Get-Content -Raw -LiteralPath $settings
+    $raw -replace '\-File "', '-File ' | Set-Content -LiteralPath $settings -Encoding Ascii
+    (& $ps1 status) | Should -Match 'Muse \(opus'
+    (& $ps1 on) | Should -Be 'Already on Muse.'
+    (Get-Content -Raw -LiteralPath $settings | ConvertFrom-Json).apiKeyHelper | Should -Match '\-File ".*key\.ps1"'
+  }
+
   It 'points the base URL at the running shim' {
     $live = Get-Content -Raw -LiteralPath $settings | ConvertFrom-Json
     $live.env.ANTHROPIC_BASE_URL | Should -Be 'http://127.0.0.1:15577'
@@ -189,7 +201,8 @@ Describe 'install.ps1 sandbox run' {
     $got = [BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($gotRaw)))
     $got | Should -Be $want
     $settings = Get-Content -Raw -LiteralPath (Join-Path $work 'settings.json') | ConvertFrom-Json
-    $settings.apiKeyHelper -like ('*' + ($work -replace '\\', '/') + '/key.ps1') | Should -Be $true
+    # Quoted -File path: install dirs under usernames with spaces need it.
+    $settings.apiKeyHelper | Should -Be ('powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + ($work -replace '\\', '/') + '/key.ps1"')
     Test-Path -LiteralPath (Join-Path $work 'muse-shim.js') | Should -Be $true
   }
 

@@ -27,19 +27,21 @@ function settingsPath() {
   return path.join(dir, 'settings.json');
 }
 
-// Muse mode is on iff the active key helper belongs to a muse-mode install
-// whose Anthropic backup exists (muse-mode writes it on `on`, deletes on
-// `off`). Never prints settings contents — boolean only.
+// Muse mode is on iff the active key helper points at a key.ps1 whose
+// directory holds the Anthropic backup (muse-mode writes
+// saved-anthropic.json on `on`, deletes on `off`). The install directory
+// name is never consulted so renamed installs keep working; quoted and
+// legacy unquoted -File paths both parse. Never prints settings
+// contents — boolean only.
 function museModeOn(settingsFile) {
   try {
     const settings = JSON.parse(fs.readFileSync(settingsFile, 'utf8'));
     const helper = String(settings.apiKeyHelper || '');
-    const hm = helper.match(/-File\s+"?([^\s"]+)/i);
+    const hm = helper.match(/-File\s+(?:"([^"]+)"|(\S+))/i);
     if (!hm) return false;
-    const keyPath = hm[1].replace(/\//g, path.sep);
+    const keyPath = (hm[1] || hm[2]).replace(/\//g, path.sep);
     if (path.basename(keyPath).toLowerCase() !== 'key.ps1') return false;
     const instDir = path.dirname(keyPath);
-    if (!/muse-mode/i.test(path.basename(instDir))) return false;
     return fs.existsSync(path.join(instDir, 'saved-anthropic.json'));
   } catch (e) {
     return false;
@@ -89,6 +91,19 @@ if (process.argv[2] === '--self-test') {
     assert.strictEqual(museModeOn(onFile), true, 'on-state detected');
     assert.strictEqual(museModeOn(offFile), false, 'off-state silent');
     assert.strictEqual(museModeOn(path.join(tmp, 'missing.json')), false, 'missing settings silent');
+    // Quoted -File paths (install dirs with spaces) and renamed install
+    // dirs both count: only key.ps1 + the Anthropic backup matter.
+    const quoted = path.join(tmp, 'quoted.json');
+    fs.writeFileSync(quoted, JSON.stringify({ apiKeyHelper: 'powershell -File "' + inst + '/key with space.ps1"' }));
+    fs.writeFileSync(path.join(inst, 'key with space.ps1'), 'x');
+    fs.writeFileSync(path.join(inst, 'saved-anthropic.json'), '{}');
+    assert.strictEqual(museModeOn(quoted), false, 'wrong filename stays off');
+    const renamed = path.join(tmp, 'renamed tools');
+    fs.mkdirSync(renamed);
+    fs.writeFileSync(path.join(renamed, 'saved-anthropic.json'), '{}');
+    const renamedFile = path.join(tmp, 'renamed.json');
+    fs.writeFileSync(renamedFile, JSON.stringify({ apiKeyHelper: 'powershell -File "' + renamed + '/key.ps1"' }));
+    assert.strictEqual(museModeOn(renamedFile), true, 'renamed dir stays on');
     const ctx = JSON.stringify({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: 'CTX' } });
     const merged = JSON.parse(buildOutput(ctx, true));
     assert.ok(merged.hookSpecificOutput.additionalContext.indexOf('CTX') !== -1, 'tracker kept');
@@ -100,7 +115,7 @@ if (process.argv[2] === '--self-test') {
     assert.strictEqual(buildOutput(block, true), block, 'block passes through');
     assert.ok(buildOutput('not-json{{{', true).indexOf('MUSE MODE') !== -1, 'bad tracker JSON + on');
     assert.strictEqual(buildOutput('not-json{{{', false), '', 'bad tracker JSON + off');
-    console.log('GATE-SELF-TEST PASS cases=11');
+    console.log('GATE-SELF-TEST PASS cases=13');
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }

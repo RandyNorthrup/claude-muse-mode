@@ -106,4 +106,4 @@
 | 2026-09-29 | Windows now, portable later; 5.1-compatible scripting required | Confirmed |
 | 2026-09-29 | MIT license | Confirmed |
 | 2026-09-29 | Schema shim rides mode on/off + install/uninstall, no new surfaces | Confirmed |
-| 2026-09-29 | Copyright holder name "Randy Northrup" assumed from GitHub handle — owner to correct if wrong | Assumed |
+| 2026-09-29 | Copyright holder name "Randy Northrup" — confirmed by owner | Confirmed |

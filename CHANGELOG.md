@@ -58,6 +58,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- `apiKeyHelper` paths are now quoted (`-File "…/key.ps1"`): installs
+  under usernames with spaces broke the helper invocation. Legacy
+  unquoted installs still count as on for `status`/`off`, and the next
+  `on` migrates them to the quoted form (Pester-pinned).
+- `muse-gate.js` mode detection no longer depends on the install
+  directory name: only `key.ps1` + the Anthropic backup
+  (`saved-anthropic.json`) matter, so renamed install dirs keep the
+  turn-chain reminder. Quoted `-File` paths parse.
+- `muse-mode.cmd` prefers `pwsh` but falls back to Windows PowerShell
+  5.1 (the `.ps1` is 5.1-safe), so machines without pwsh still switch.
+- `key.ps1` header comment corrected (installer writes a ProtectedData
+  hex export, not a `ConvertFrom-SecureString` export).
+- `.gitignore` now also covers `*.bak-muse-gate`, `muse-shim.pid`, and
+  `muse-shim.log` (machine-local runtime tracks, never repo content).
+
 - `muse-shim.js`: re-declare Content-Length after stripping/re-serializing
   the request body. The old code forwarded the client's original (longer)
   length with the shortened body, so the upstream waited for bytes that

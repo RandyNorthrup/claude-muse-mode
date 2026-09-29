@@ -2,4 +2,7 @@
 modelapi-key.dpapi
 saved-*.json
 *.bak-muse-mode
+*.bak-muse-gate
 settings.json
+muse-shim.pid
+muse-shim.log

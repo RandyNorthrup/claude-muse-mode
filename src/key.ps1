@@ -1,9 +1,9 @@
-# apiKeyHelper for muse-claude: prints the Meta Model API key for Claude
+# apiKeyHelper for muse-mode: prints the Meta Model API key for Claude
 # Code's model requests. The key is stored DPAPI-encrypted for this Windows
-# user only (modelapi-key.dpapi, a ConvertFrom-SecureString export) and is
-# never written anywhere in clear. Decrypted with .NET directly: Windows
-# PowerShell started from PowerShell 7 inherits a module path that cannot
-# load ConvertTo-SecureString.
+# user only (modelapi-key.dpapi, a ProtectedData hex export written by
+# install.ps1) and is never written anywhere in clear. Decrypted with .NET
+# directly: Windows PowerShell started from PowerShell 7 inherits a module
+# path that cannot load ConvertTo-SecureString.
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Security
 $hex = (Get-Content -Raw (Join-Path $PSScriptRoot 'modelapi-key.dpapi')).Trim()
