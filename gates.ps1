@@ -1,4 +1,4 @@
-# gates.ps1 — the full verification gate set. CI (.github/workflows/ci.yml)
+# gates.ps1 - the full verification gate set. CI (.github/workflows/ci.yml)
 # runs this exact script, so a local green means CI green.
 #   pwsh -NoProfile -File ./gates.ps1           # missing optional tools warn and skip
 #   pwsh -NoProfile -File ./gates.ps1 -Strict   # CI mode: missing tools fail instead
@@ -8,7 +8,7 @@ $ErrorActionPreference = 'Stop'
 $pesterPinned = '5.7.1'
 $pssaPinned = '1.25.0'
 
-function Ensure-PinnedModule([string]$Name, [string]$Version) {
+function Install-PinnedModule([string]$Name, [string]$Version) {
   $found = Get-Module -ListAvailable -Name $Name | Where-Object { [string]$_.Version -eq $Version }
   if ($null -eq $found) {
     Write-Output "$Name $Version not installed; installing for the current user."
@@ -30,24 +30,25 @@ function Test-ToolPresent([string]$Name) {
   return $false
 }
 
-Ensure-PinnedModule 'PSScriptAnalyzer' $pssaPinned
-Ensure-PinnedModule 'Pester' $pesterPinned
+if ($Strict) { Write-Output 'Strict mode: missing optional tools fail the run.' }
+Install-PinnedModule 'PSScriptAnalyzer' $pssaPinned
+Install-PinnedModule 'Pester' $pesterPinned
 
-Invoke-ScriptAnalyzer -Path . -Recurse -EnableExit -ErrorAction Stop
+Invoke-ScriptAnalyzer -Path . -Recurse -EnableExit -Settings ./PSScriptAnalyzerSettings.psd1 -ErrorAction Stop
 Write-Output 'LINT-CLEAN'
 
 Invoke-Pester ./test -EnableExit
 
-Invoke-Native 'node' '--check src/muse-shim.js' 'node --check (shim)'
-Invoke-Native 'node' '--check src/muse-gate.js' 'node --check (gate)'
-Invoke-Native 'node' 'src/muse-shim.js --self-test' 'shim self-test'
-Invoke-Native 'node' 'src/muse-gate.js --self-test' 'gate self-test'
+Invoke-Native -File 'node' -Arguments '--check src/muse-shim.js' -Label 'node --check (shim)'
+Invoke-Native -File 'node' -Arguments '--check src/muse-gate.js' -Label 'node --check (gate)'
+Invoke-Native -File 'node' -Arguments 'src/muse-shim.js --self-test' -Label 'shim self-test'
+Invoke-Native -File 'node' -Arguments 'src/muse-gate.js --self-test' -Label 'gate self-test'
 
 if (Test-ToolPresent 'gitleaks') {
-  Invoke-Native 'gitleaks' 'detect --source . --no-git' 'gitleaks'
+  Invoke-Native -File 'gitleaks' -Arguments 'detect --source . --no-git' -Label 'gitleaks'
 }
 if (Test-ToolPresent 'actionlint') {
-  Invoke-Native 'actionlint' '.github/workflows/ci.yml' 'actionlint'
+  Invoke-Native -File 'actionlint' -Arguments '.github/workflows/ci.yml' -Label 'actionlint'
 }
 
 Write-Output 'GATES-GREEN'

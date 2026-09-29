@@ -202,6 +202,7 @@ Brief: PROJECT_BRIEF.md (Confirmed 2026-09-29).
 | D15 fable/subagent keys | deleted ANTHROPIC_DEFAULT_FABLE_MODEL from sandbox settings copy | yes, assertion tripped on missing key | yes, re-on restored muse-spark-1.3; Pester 30/30 |
 | muse-gate merge table | expectation to `WRONG-ON-PURPOSE` in temp copy | yes, exit 1 | yes, Pester green, temp copy deleted |
 | CI parity (Pester under v5 images) | six straight red runs (36605500883 et al) | yes, `& $ps1` null on every test | yes, Pester 5 migration green 35/35 |
+| strict gates lint (gates.ps1 self-lint) | real CI failure on run 36608321177: unapproved verb `Ensure-`, em-dash (BOM rule), unused `Strict` param, positional args | yes, CI red; local exit 6 with 6 warnings | yes, local `gates.ps1 -Strict` exit 0, LINT-CLEAN, 35/35 |
 
 ## Notes
 
