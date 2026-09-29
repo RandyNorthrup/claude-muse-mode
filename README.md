@@ -7,6 +7,7 @@ one command. No affiliation with or endorsement by Meta.
 
 - `muse-mode on` — new Claude Code sessions use Muse via Meta's Anthropic-compatible endpoint, with per-tier defaults (opus `muse-spark-1.3-contributor`, sonnet `muse-spark-1.2-contributor`, haiku `muse-spark-1.1`, fable `muse-spark-1.3` — four distinct live chat ids), plus picker `NAME`/`DESCRIPTION` labels so rows show Muse names instead of "Custom <Tier> model", plus the fifth spark id (`muse-spark-1.2`) on the picker's custom row. Subagents follow the main (opus) model.
 - `muse-mode off` — back to Anthropic (your claude.ai login). Whatever model/env settings you had are restored, and the shim is stopped.
+- Turn-chain reminder — every prompt runs the previous tracker, then appends "finish the turn chain" context only while Muse mode is on, so turns keep chaining tools instead of ending on status promises; Claude-mode prompts pass through untouched.
 - `muse-mode status` — which one new sessions will use.
 - `muse-mode shim` — whether the schema shim is running.
 - `muse-claude.cmd` — one-shot launcher: runs `claude` on Muse for that process only, without touching your settings.
@@ -113,6 +114,8 @@ src/                  the launcher scripts (portable copies, no local paths)
   muse-mode.cmd       pwsh launcher for cmd.exe
   muse-claude.cmd     one-shot `claude` on Muse (starts the shim on demand)
   muse-shim.js        localhost schema-sanitizing proxy (node, stdlib only)
+  muse-gate.js        UserPromptSubmit dispatcher: previous tracker, plus the
+                      anti-stall reminder only while Muse mode is on
   key.ps1             apiKeyHelper: decrypts the stored key per request
   settings.template.json  shape of the machine-local settings.json
 install.ps1           installer: copy, prompt, encrypt, settings, PATH
@@ -131,6 +134,8 @@ Invoke-ScriptAnalyzer -Path . -Recurse -EnableExit
 pwsh -NoProfile -Command "Invoke-Pester ./test -EnableExit"
 # shim self-test (no network)
 node src/muse-shim.js --self-test
+# turn-chain gate self-test (no network)
+node src/muse-gate.js --self-test
 # secrets (--no-git: also scans the uncommitted tree)
 gitleaks detect --source . --no-git --verbose
 ```

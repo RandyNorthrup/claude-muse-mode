@@ -397,8 +397,90 @@ function Install-MusePricing {
   return $true
 }
 
+function Get-ClaudeHooksDir {
+  # Tests only: redirect at a temp dir instead of the real hooks dir.
+  if (-not [string]::IsNullOrWhiteSpace($env:MUSE_TEST_HOOKS_DIR)) {
+    return $env:MUSE_TEST_HOOKS_DIR
+  }
+  return (Join-Path $env:USERPROFILE '.claude\hooks')
+}
+
+function Get-ClaudeSettingsPath {
+  # Tests only: redirect at a temp file instead of the real settings.
+  if (-not [string]::IsNullOrWhiteSpace($env:MUSE_TEST_CLAUDE_SETTINGS)) {
+    return $env:MUSE_TEST_CLAUDE_SETTINGS
+  }
+  return (Join-Path $env:USERPROFILE '.claude\settings.json')
+}
+
+function Install-MuseGate([string]$SourcePath) {
+  # Copies muse-gate.js to the Claude hooks dir and points the
+  # UserPromptSubmit hook at it. The dispatcher runs the previous tracker
+  # itself, then appends the anti-stall reminder only while Muse mode is
+  # on; Claude-mode output is untouched. Unknown hook shapes are left
+  # alone loudly. Returns $true when registered (or already current, or
+  # nothing to register yet), $false when skipped.
+  if ([string]::IsNullOrWhiteSpace($SourcePath)) {
+    $SourcePath = Join-Path $PSScriptRoot 'src\muse-gate.js'
+  }
+  if (-not (Test-Path -LiteralPath $SourcePath)) {
+    Write-Warning 'muse-gate.js not found next to install.ps1; turn-chain reminder not installed.'
+    return $false
+  }
+  $hooksDir = Get-ClaudeHooksDir
+  if (-not (Test-Path -LiteralPath $hooksDir)) { New-Item -ItemType Directory -Path $hooksDir -Force | Out-Null }
+  Copy-Item -LiteralPath $SourcePath -Destination (Join-Path $hooksDir 'muse-gate.js') -Force
+  $settingsPath = Get-ClaudeSettingsPath
+  if (-not (Test-Path -LiteralPath $settingsPath)) {
+    Write-Output 'No Claude settings.json yet; turn-chain reminder registers on first run.'
+    return $true
+  }
+  $text = Get-Content -Raw -LiteralPath $settingsPath
+  if ($text -match 'muse-gate\.js') {
+    Write-Output 'Turn-chain reminder already set.'
+    return $true
+  }
+  if (([regex]::Matches($text, 'caveman-mode-tracker\.js')).Count -ne 1) {
+    Write-Output 'UserPromptSubmit hook is not the known tracker; leaving it alone (turn-chain reminder not installed).'
+    return $false
+  }
+  Copy-Item -LiteralPath $settingsPath -Destination "$settingsPath.bak-muse-gate" -Force -ErrorAction SilentlyContinue
+  $nl = "`n"
+  if ($text.Contains("`r`n")) { $nl = "`r`n" }
+  $lines = $text -split $nl
+  $bumped = $false
+  for ($i = 0; $i -lt $lines.Count; $i++) {
+    if ($lines[$i] -match 'caveman-mode-tracker\.js') {
+      $lines[$i] = $lines[$i] -replace 'caveman-mode-tracker\.js', 'muse-gate.js'
+      if ($lines[$i] -match '"timeout"') {
+        $lines[$i] = $lines[$i] -replace '"timeout":\s*5', '"timeout": 10'
+        $bumped = $true
+      }
+      for ($j = $i + 1; ($j -lt $lines.Count) -and (-not $bumped); $j++) {
+        if ($lines[$j] -match '"timeout"') {
+          $lines[$j] = $lines[$j] -replace '"timeout":\s*5', '"timeout": 10'
+          $bumped = $true
+        }
+      }
+      break
+    }
+  }
+  Write-Utf8NoBom $settingsPath ($lines -join $nl)
+  try {
+    $check = Get-Content -Raw -LiteralPath $settingsPath | ConvertFrom-Json
+    if ($check.hooks.UserPromptSubmit.hooks.command -notmatch 'muse-gate\.js') { throw 'verification failed' }
+  }
+  catch {
+    Copy-Item -LiteralPath "$settingsPath.bak-muse-gate" -Destination $settingsPath -Force -ErrorAction SilentlyContinue
+    Write-Warning 'Turn-chain reminder verification failed; settings restored.'
+    return $false
+  }
+  Write-Output 'Turn-chain reminder installed (Muse mode only; Claude mode untouched).'
+  return $true
+}
+
 $srcDir = Join-Path $PSScriptRoot 'src'
-foreach ($required in @('muse-mode.ps1', 'muse-mode.cmd', 'muse-claude.cmd', 'key.ps1', 'muse-shim.js')) {
+foreach ($required in @('muse-mode.ps1', 'muse-mode.cmd', 'muse-claude.cmd', 'key.ps1', 'muse-shim.js', 'muse-gate.js')) {
   if (-not (Test-Path -LiteralPath (Join-Path $srcDir $required))) {
     throw "Repo file missing: $required. Run install.ps1 from the repository root."
   }
@@ -417,6 +499,7 @@ Copy-Item -LiteralPath (Join-Path $srcDir 'muse-mode.cmd') -Destination (Join-Pa
 Copy-Item -LiteralPath (Join-Path $srcDir 'muse-claude.cmd') -Destination (Join-Path $InstallDir 'muse-claude.cmd') -Force
 Copy-Item -LiteralPath (Join-Path $srcDir 'key.ps1') -Destination (Join-Path $InstallDir 'key.ps1') -Force
 Copy-Item -LiteralPath (Join-Path $srcDir 'muse-shim.js') -Destination (Join-Path $InstallDir 'muse-shim.js') -Force
+Copy-Item -LiteralPath (Join-Path $srcDir 'muse-gate.js') -Destination (Join-Path $InstallDir 'muse-gate.js') -Force
 
 $keyPath = Join-Path $InstallDir 'modelapi-key.dpapi'
 if ((Test-Path -LiteralPath $keyPath) -and (-not $Force) -and ($null -eq $ApiKey)) {
@@ -474,6 +557,7 @@ if (-not (Test-Path -LiteralPath (Join-Path $InstallDir 'key.ps1'))) { throw 'ke
 # or unavailable (CI/tests set MUSE_TEST_MANAGED_SETTINGS instead): /cost
 # keeps fallback pricing, everything else works.
 Install-MusePricing | Out-Null
+Install-MuseGate | Out-Null
 if ($target -eq 'vscode') {
   Install-VSCodeProfile (Join-Path $InstallDir 'muse-claude.cmd')
 }

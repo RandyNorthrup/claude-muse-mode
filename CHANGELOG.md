@@ -43,6 +43,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   non-fatal when declined or non-interactive — `/cost` keeps fallback
   pricing). Panel then prices Muse sessions at Meta rates instead of
   "unknown models"; self-toggling (muse-* ids only).
+- Turn-chain reminder (`muse-gate.js`, `Install-MuseGate`): the installer
+  points the `UserPromptSubmit` hook at a dispatcher that runs the previous
+  tracker, then appends "finish the turn chain" context only while Muse
+  mode is on (key helper + `saved-anthropic.json` check); Claude-mode
+  prompts pass through untouched. Unknown hook shapes are left alone
+  loudly; `node muse-gate.js --self-test` covers the merge table.
 
 ### Fixed
 

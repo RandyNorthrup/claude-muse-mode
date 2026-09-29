@@ -159,6 +159,19 @@ Brief: PROJECT_BRIEF.md (Confirmed 2026-09-29).
   `MUSE_TEST_MANAGED_SETTINGS` redirects Pester at temp files (never a
   real UAC prompt). Open: `[1m]` context suffix for muse ids (200k
   auto-compact cap warning — owner call).
+- D17: turn-chain reminder gated to Muse mode (agent stalled mid-fix in
+  the other harness: one tool call per turn, then a text-only promise).
+  Prime suspect is caveman-full brevity pressure (flag read `full`;
+  per-turn style injection rewards short replies, and a short reply ends
+  the turn); hooks cleared (no Stop hook registered, tracker only writes
+  flags). Fix: `src/muse-gate.js` dispatcher runs the previous tracker,
+  then appends the anti-stall reminder only while Muse mode is on (key
+  helper + `saved-anthropic.json` check — `off` deletes it, so Claude
+  mode is provably untouched). `Install-MuseGate` copies it to the hooks
+  dir and wraps only the known tracker shape, backing settings up first;
+  unknown shapes are left alone loudly. Owner rule: Muse accommodations
+  must toggle, never apply across both — the earlier global CLAUDE.md
+  rule was reverted same session.
 
 ## Red-drill evidence
 
@@ -177,6 +190,7 @@ Brief: PROJECT_BRIEF.md (Confirmed 2026-09-29).
 | SSE thinking filter | branch disabled | yes, true!==false exit 1 | yes, SELF-TEST PASS |
 | muse pricing rates | expectation to `999.999` | yes, 29/30 exit 1 | yes, 30/30 |
 | D15 fable/subagent keys | deleted ANTHROPIC_DEFAULT_FABLE_MODEL from sandbox settings copy | yes, assertion tripped on missing key | yes, re-on restored muse-spark-1.3; Pester 30/30 |
+| muse-gate merge table | expectation to `WRONG-ON-PURPOSE` in temp copy | yes, exit 1 | yes, Pester green, temp copy deleted |
 
 ## Notes
 

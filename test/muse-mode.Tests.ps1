@@ -19,7 +19,8 @@ function Import-InstallerTui {
   $wanted = @('Get-InstallerBanner', 'Get-TargetMenu', 'Convert-TargetChoice',
     'Get-RecommendedTarget', 'Get-InstallSummary', 'Write-UiLine',
     'Write-Utf8NoBom',
-    'Get-MusePricingJson', 'Get-ManagedSettingsPath', 'Install-MusePricing')
+    'Get-MusePricingJson', 'Get-ManagedSettingsPath', 'Install-MusePricing',
+    'Get-ClaudeHooksDir', 'Get-ClaudeSettingsPath', 'Install-MuseGate')
   $found = $ast.FindAll(
     { $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst] },
     $true) | Where-Object { $wanted -contains $_.Name }
@@ -157,6 +158,13 @@ Describe 'install.ps1 sandbox run' {
   # Redirect the admin-only pricing write at a temp file: Pester must never
   # trigger a UAC prompt.
   $env:MUSE_TEST_MANAGED_SETTINGS = Join-Path $work 'managed-settings.json'
+  # Redirect the turn-chain gate at temp paths: the installer must never
+  # touch the real ~/.claude hooks dir or settings.json.
+  $env:MUSE_TEST_HOOKS_DIR = Join-Path $work 'hooks'
+  $env:MUSE_TEST_CLAUDE_SETTINGS = Join-Path $work 'claude-settings.json'
+  New-Item -ItemType Directory -Path $work | Out-Null
+  '{"hooks":{"UserPromptSubmit":{"hooks":{"type":"command","command":"node C:\\x\\caveman-mode-tracker.js","timeout":5}}}}' |
+    Set-Content -LiteralPath $env:MUSE_TEST_CLAUDE_SETTINGS -Encoding Ascii
   $canaryPlain = 'canary-' + [Guid]::NewGuid().ToString('N')
   # Built char-by-char so the plaintextCmdlet rule stays strict everywhere.
   $canary = New-Object Security.SecureString
@@ -203,7 +211,19 @@ Describe 'install.ps1 sandbox run' {
     $doc.modelPricing.overrides.'muse-spark-1.1'.output | Should Be 4.25
   }
 
+  It 'installer registers the turn-chain gate in the redirected hooks dir' {
+    Test-Path -LiteralPath (Join-Path $work 'muse-gate.js') | Should Be $true
+    $gate = Get-Content -Raw -LiteralPath (Join-Path $env:MUSE_TEST_HOOKS_DIR 'muse-gate.js')
+    $gate | Should Be (Get-Content -Raw -LiteralPath (Join-Path $repoSrc 'muse-gate.js'))
+    $cs = Get-Content -Raw -LiteralPath $env:MUSE_TEST_CLAUDE_SETTINGS | ConvertFrom-Json
+    $cs.hooks.UserPromptSubmit.hooks.command | Should Match 'muse-gate\.js'
+    $cs.hooks.UserPromptSubmit.hooks.timeout | Should Be 10
+    Test-Path -LiteralPath ($env:MUSE_TEST_CLAUDE_SETTINGS + '.bak-muse-gate') | Should Be $true
+  }
+
   Remove-Item Env:\MUSE_TEST_MANAGED_SETTINGS -ErrorAction SilentlyContinue
+  Remove-Item Env:\MUSE_TEST_HOOKS_DIR -ErrorAction SilentlyContinue
+  Remove-Item Env:\MUSE_TEST_CLAUDE_SETTINGS -ErrorAction SilentlyContinue
   Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
   # Test shim from the round-trip (temp port): stop it and remove its tracks.
   & node (Join-Path $repoSrc 'muse-shim.js') --stop | Out-Null
@@ -218,6 +238,8 @@ Describe 'install.ps1 vscode target' {
   '{"editor.fontSize": 14}' | Set-Content -LiteralPath $codeSettings -Encoding Ascii
   $env:MUSE_TEST_VSCODE_SETTINGS = $codeSettings
   $env:MUSE_TEST_MANAGED_SETTINGS = Join-Path $work3 'managed-settings.json'
+  $env:MUSE_TEST_HOOKS_DIR = Join-Path $work3 'hooks'
+  $env:MUSE_TEST_CLAUDE_SETTINGS = Join-Path $work3 'claude-settings.json'
   $canary3 = New-Object Security.SecureString
   ('canary-' + [Guid]::NewGuid().ToString('N')).ToCharArray() | ForEach-Object { $canary3.AppendChar($_) }
   $canary3.MakeReadOnly()
@@ -255,6 +277,8 @@ Describe 'install.ps1 vscode target' {
 
   Remove-Item Env:\MUSE_TEST_VSCODE_SETTINGS -ErrorAction SilentlyContinue
   Remove-Item Env:\MUSE_TEST_MANAGED_SETTINGS -ErrorAction SilentlyContinue
+  Remove-Item Env:\MUSE_TEST_HOOKS_DIR -ErrorAction SilentlyContinue
+  Remove-Item Env:\MUSE_TEST_CLAUDE_SETTINGS -ErrorAction SilentlyContinue
   Remove-Item -LiteralPath $work3 -Recurse -Force -ErrorAction SilentlyContinue
 }
 
@@ -384,6 +408,94 @@ Describe 'muse usage pricing' {
     }
     finally {
       Remove-Item Env:\MUSE_TEST_MANAGED_SETTINGS -ErrorAction SilentlyContinue
+    }
+  }
+}
+
+Describe 'muse turn-chain gate' {
+  . Import-InstallerTui
+  $gateJs = Join-Path $repoSrc 'muse-gate.js'
+
+  It 'self-test passes with no network or settings' {
+    (& node $gateJs --self-test) | Should Match 'GATE-SELF-TEST PASS'
+  }
+
+  It 'merges the reminder only while Muse mode is on' {
+    $t = Join-Path ([IO.Path]::GetTempPath()) ('muse-gate-test-' + [Guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $t | Out-Null
+    try {
+      $im = Join-Path $t 'claude-muse-mode-test'
+      New-Item -ItemType Directory -Path $im | Out-Null
+      '{}' | Set-Content -LiteralPath (Join-Path $im 'saved-anthropic.json') -Encoding Ascii
+      $on = Join-Path $t 'on.json'
+      $off = Join-Path $t 'off.json'
+      (@{ apiKeyHelper = 'powershell -File ' + ((Join-Path $im 'key.ps1') -replace '\\', '/') } | ConvertTo-Json) |
+        Set-Content -LiteralPath $on -Encoding Ascii
+      (@{ apiKeyHelper = 'other-helper' } | ConvertTo-Json) |
+        Set-Content -LiteralPath $off -Encoding Ascii
+      $ctx = Join-Path $t 'ctx.js'
+      'process.stdout.write(JSON.stringify({hookSpecificOutput:{hookEventName:"UserPromptSubmit",additionalContext:"CTX"}}))' |
+        Set-Content -LiteralPath $ctx -Encoding Ascii
+      $env:MUSE_GATE_TRACKER_CMD = $ctx
+      $env:MUSE_GATE_TEST_SETTINGS = $on
+      $merged = ('{"prompt":"hi"}' | & node $gateJs)
+      $merged | Should Match 'CTX'
+      $merged | Should Match 'MUSE MODE'
+      $env:MUSE_GATE_TEST_SETTINGS = $off
+      $quiet = ('{"prompt":"hi"}' | & node $gateJs)
+      $quiet | Should Match 'CTX'
+      $quiet | Should Not Match 'MUSE MODE'
+    }
+    finally {
+      Remove-Item Env:\MUSE_GATE_TRACKER_CMD -ErrorAction SilentlyContinue
+      Remove-Item Env:\MUSE_GATE_TEST_SETTINGS -ErrorAction SilentlyContinue
+      Remove-Item -LiteralPath $t -Recurse -Force -ErrorAction SilentlyContinue
+    }
+  }
+
+  It 'wraps the known tracker and leaves foreign hooks alone' {
+    $t = Join-Path ([IO.Path]::GetTempPath()) ('muse-gate-install-' + [Guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $t | Out-Null
+    $env:MUSE_TEST_HOOKS_DIR = Join-Path $t 'hooks'
+    $env:MUSE_TEST_CLAUDE_SETTINGS = Join-Path $t 'claude.json'
+    try {
+      '{"hooks":{"UserPromptSubmit":{"hooks":{"type":"command","command":"node C:\\x\\caveman-mode-tracker.js","timeout":5}}}}' |
+        Set-Content -LiteralPath $env:MUSE_TEST_CLAUDE_SETTINGS -Encoding Ascii
+      $first = @(Install-MuseGate -SourcePath $gateJs)
+      $first[-1] | Should Be $true
+      $copied = Get-Content -Raw -LiteralPath (Join-Path $env:MUSE_TEST_HOOKS_DIR 'muse-gate.js')
+      $copied | Should Be (Get-Content -Raw -LiteralPath $gateJs)
+      $after = Get-Content -Raw -LiteralPath $env:MUSE_TEST_CLAUDE_SETTINGS | ConvertFrom-Json
+      $after.hooks.UserPromptSubmit.hooks.command | Should Match 'muse-gate\.js'
+      $after.hooks.UserPromptSubmit.hooks.timeout | Should Be 10
+      $second = @(Install-MuseGate -SourcePath $gateJs)
+      $second[-1] | Should Be $true
+      '{"hooks":{"UserPromptSubmit":{"hooks":{"type":"command","command":"node other.js","timeout":5}}}}' |
+        Set-Content -LiteralPath $env:MUSE_TEST_CLAUDE_SETTINGS -Encoding Ascii
+      $before = Get-Content -Raw -LiteralPath $env:MUSE_TEST_CLAUDE_SETTINGS
+      $third = @(Install-MuseGate -SourcePath $gateJs)
+      $third[-1] | Should Be $false
+      (Get-Content -Raw -LiteralPath $env:MUSE_TEST_CLAUDE_SETTINGS) | Should Be $before
+      $fourth = @(Install-MuseGate -SourcePath (Join-Path $t 'nope.js'))
+      $fourth[-1] | Should Be $false
+    }
+    finally {
+      Remove-Item Env:\MUSE_TEST_HOOKS_DIR -ErrorAction SilentlyContinue
+      Remove-Item Env:\MUSE_TEST_CLAUDE_SETTINGS -ErrorAction SilentlyContinue
+      Remove-Item -LiteralPath $t -Recurse -Force -ErrorAction SilentlyContinue
+    }
+  }
+
+  It 'redirects resolve to temp paths' {
+    $env:MUSE_TEST_HOOKS_DIR = 'X:\definitely-not-here\hooks'
+    $env:MUSE_TEST_CLAUDE_SETTINGS = 'X:\definitely-not-here\claude.json'
+    try {
+      (Get-ClaudeHooksDir) | Should Be 'X:\definitely-not-here\hooks'
+      (Get-ClaudeSettingsPath) | Should Be 'X:\definitely-not-here\claude.json'
+    }
+    finally {
+      Remove-Item Env:\MUSE_TEST_HOOKS_DIR -ErrorAction SilentlyContinue
+      Remove-Item Env:\MUSE_TEST_CLAUDE_SETTINGS -ErrorAction SilentlyContinue
     }
   }
 }
