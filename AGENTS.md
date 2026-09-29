@@ -17,6 +17,9 @@ Small public repo of Windows install scripts. Keep it boring and safe.
    command changes, re-run it before committing.
 4. **Gates green before release:** PSScriptAnalyzer (`-EnableExit`), Pester,
    `node --check` + `--self-test`, gitleaks, actionlint for workflow changes.
+   Run them via `pwsh -NoProfile -File ./gates.ps1` — the same script CI
+   runs, with Pester 5.7.1 / PSScriptAnalyzer 1.25.0 pinned, so a local
+   green means CI green.
    Tests need node (round-trip starts a shim on a temp port).
 5. **Shim discipline:** stdlib only; summary log lines never carry bodies,
    headers, or keys; fixed port 15555 (`MUSE_SHIM_PORT` override); PID and

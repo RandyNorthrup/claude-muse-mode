@@ -171,16 +171,9 @@ test/                 Pester round-trip tests (temp settings copy, canary key)
 Requires Node.js (the round-trip tests start a shim on a temp port).
 
 ```powershell
-# lint (installs PSScriptAnalyzer for the current user if missing)
-Invoke-ScriptAnalyzer -Path . -Recurse -EnableExit
-# tests (PowerShell 7)
-pwsh -NoProfile -Command "Invoke-Pester ./test -EnableExit"
-# shim self-test (no network)
-node src/muse-shim.js --self-test
-# turn-chain gate self-test (no network)
-node src/muse-gate.js --self-test
-# secrets (--no-git: also scans the uncommitted tree)
-gitleaks detect --source . --no-git --verbose
+# full gates: the same script CI runs (installs pinned Pester/PSScriptAnalyzer
+# for the current user if missing; gitleaks/actionlint warn and skip when absent)
+pwsh -NoProfile -File ./gates.ps1
 ```
 
 ## License

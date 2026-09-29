@@ -172,6 +172,16 @@ Brief: PROJECT_BRIEF.md (Confirmed 2026-09-29).
   unknown shapes are left alone loudly. Owner rule: Muse accommodations
   must toggle, never apply across both — the earlier global CLAUDE.md
   rule was reverted same session.
+- D18: CI parity (CI red on six straight pushes while local was green).
+  Root cause: runner images moved to Pester 5 while the suite relied on
+  Pester 3.4 scoping (Describe-body setup invisible at run time, legacy
+  `Should Be` syntax) — `& $ps1` bound null, every test failed. Fix:
+  suite migrated to Pester 5 (`BeforeAll`/`AfterAll`,
+  `test/Import-InstallerTui.ps1` dot-sourced per Describe since top-level
+  definitions are invisible too, `Should -Be`), Pester 5.7.1 +
+  PSScriptAnalyzer 1.25.0 pinned, and `gates.ps1` runs the whole set
+  locally and in CI (`-Strict` there), so the two can never drift apart
+  again.
 
 ## Red-drill evidence
 
@@ -191,6 +201,7 @@ Brief: PROJECT_BRIEF.md (Confirmed 2026-09-29).
 | muse pricing rates | expectation to `999.999` | yes, 29/30 exit 1 | yes, 30/30 |
 | D15 fable/subagent keys | deleted ANTHROPIC_DEFAULT_FABLE_MODEL from sandbox settings copy | yes, assertion tripped on missing key | yes, re-on restored muse-spark-1.3; Pester 30/30 |
 | muse-gate merge table | expectation to `WRONG-ON-PURPOSE` in temp copy | yes, exit 1 | yes, Pester green, temp copy deleted |
+| CI parity (Pester under v5 images) | six straight red runs (36605500883 et al) | yes, `& $ps1` null on every test | yes, Pester 5 migration green 35/35 |
 
 ## Notes
 

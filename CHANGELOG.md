@@ -43,6 +43,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   non-fatal when declined or non-interactive — `/cost` keeps fallback
   pricing). Panel then prices Muse sessions at Meta rates instead of
   "unknown models"; self-toggling (muse-* ids only).
+- CI parity: `gates.ps1` runs the full gate set with Pester 5.7.1 /
+  PSScriptAnalyzer 1.25.0 pinned, and CI runs that same script — a local
+  green means CI green. Suite migrated to Pester 5 (`BeforeAll` setup,
+  `Should -Be` assertions, per-Describe loader) after runner images moved
+  off Pester 3.4-era scoping and every CI run went red while local stayed
+  green.
 - Turn-chain reminder (`muse-gate.js`, `Install-MuseGate`): the installer
   points the `UserPromptSubmit` hook at a dispatcher that runs the previous
   tracker, then appends "finish the turn chain" context only while Muse
