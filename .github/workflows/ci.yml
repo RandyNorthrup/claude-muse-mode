@@ -15,10 +15,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Tools (actionlint)
+      - name: Tools (actionlint, gitleaks)
         shell: pwsh
         run: |
-          choco install actionlint -y --no-progress
+          choco install actionlint gitleaks -y --no-progress
 
       - name: Gates (lint, tests, shim, secrets, workflows)
         shell: pwsh
