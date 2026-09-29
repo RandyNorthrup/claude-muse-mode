@@ -26,3 +26,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   (per-choice descriptions, auto-recommended target, words accepted),
   friendly invalid-input reprompts, an instructed API-key prompt with a
   labeled keep/replace choice, and a next-steps summary.
+
+### Fixed
+
+- `muse-shim.js`: re-declare Content-Length after stripping/re-serializing
+  the request body. The old code forwarded the client's original (longer)
+  length with the shortened body, so the upstream waited for bytes that
+  never came and every tool-carrying request hung until the client timed
+  out (~6 min) and retried. `--self-test` now includes a localhost relay
+  test pinning declared-vs-received lengths.

@@ -84,6 +84,12 @@ Brief: PROJECT_BRIEF.md (Confirmed 2026-09-29).
   interactive PTY probe — Object[] where SecureString belongs). The old
   menu's silent re-prompt on invalid input was the reported "hang"; the
   new menu names the problem and re-shows itself.
+- D10: shim re-declares Content-Length on every re-serialized body (the
+  2026-09-29 VS Code hang: stripped bodies went out under the original
+  length, Meta waited, Claude Code retried every ~6 min). Regression
+  cover is a localhost relay inside `--self-test` (dummy upstream waits
+  for the full body; ~2s red without the fix), not Pester — the
+  round-trip suite only exercises shim health/settings, never relay.
 
 ## Red-drill evidence
 
@@ -95,6 +101,7 @@ Brief: PROJECT_BRIEF.md (Confirmed 2026-09-29).
 | shim self-test | `pattern >= 99` assert | yes, exit 1 | yes, SELF-TEST PASS |
 | vscode profile test | profile-path expectation to `does-not-exist-zzz` | yes, 14/15 exit 1 | yes, 15/15 (2026-09-29 resume) |
 | TUI text test | choice expectation to `WRONG-ON-PURPOSE` | yes, 8/9 exit 1 | yes, 9/9 |
+| shim relay test | fix line commented out | yes, 408 exit 1 (~2s) | yes, RELAY-TEST PASS |
 
 ## Notes
 

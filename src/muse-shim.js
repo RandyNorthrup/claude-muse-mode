@@ -120,11 +120,17 @@ function startServer(port, upstream, noStrip) {
       let raw = Buffer.concat(chunks);
       const ctype = String(clientReq.headers['content-type'] || '');
       let logExtra = '';
+      const fwdHeaders = hopHeaders({ ...clientReq.headers, host: target.host });
       if (raw.length > 0 && ctype.includes('application/json')) {
         try {
           const parsed = JSON.parse(raw.toString('utf8'));
           const { body, stripped, tools } = sanitizeTools(parsed, noStrip);
           raw = Buffer.from(JSON.stringify(body));
+          // Stripping (and re-serializing) changes the body length: the
+          // client's original Content-Length would leave the upstream
+          // waiting for bytes that never come (hang until timeout), so
+          // re-declare the length we actually forward.
+          fwdHeaders['content-length'] = String(raw.length);
           logExtra = ` tools=${tools} stripped=${JSON.stringify(stripped)}${noStrip ? ' (count-only)' : ''}`;
         } catch (e) {
           // Not parseable JSON: forward untouched.
@@ -139,7 +145,7 @@ function startServer(port, upstream, noStrip) {
         port: target.port || (secure ? 443 : 80),
         path: clientReq.url,
         method: clientReq.method,
-        headers: hopHeaders({ ...clientReq.headers, host: target.host }),
+        headers: fwdHeaders,
       });
       upstreamReq.on('response', (upstreamRes) => {
         clientRes.writeHead(upstreamRes.statusCode, hopHeaders(upstreamRes.headers));
@@ -164,8 +170,73 @@ function startServer(port, upstream, noStrip) {
   return server;
 }
 
+// Relay self-test: a strip-triggering POST with an explicit Content-Length
+// (what Claude Code sends) through the real server path into a dummy
+// upstream that waits for the full declared body. Catches the hang where
+// the shim forwarded the stripped body under the original (longer)
+// Content-Length: the upstream then waits for bytes that never come.
+// Localhost only, stdlib only, bounded (~2s red on regression).
+async function relaySelfTest() {
+  const assert = require('assert');
+  const upstream = http.createServer((req, res) => {
+    const declared = Number(req.headers['content-length'] || 0);
+    const chunks = [];
+    const timer = setTimeout(() => {
+      res.writeHead(408, { 'content-type': 'application/json', connection: 'close' });
+      res.end(JSON.stringify({ error: 'body incomplete', got: Buffer.concat(chunks).length, declared }));
+    }, 2000);
+    req.on('data', (c) => chunks.push(c));
+    req.on('end', () => {
+      clearTimeout(timer);
+      const body = Buffer.concat(chunks);
+      res.writeHead(200, { 'content-type': 'application/json', connection: 'close' });
+      res.end(JSON.stringify({
+        got: body.length,
+        declared,
+        stripped: !body.toString('utf8').includes('pattern'),
+      }));
+    });
+  });
+  await new Promise((r) => upstream.listen(0, '127.0.0.1', r));
+  const upPort = upstream.address().port;
+
+  const shim = startServer(0, `http://127.0.0.1:${upPort}`, false);
+  await new Promise((r) => shim.on('listening', r));
+  const shimPort = shim.address().port;
+
+  const payload = JSON.stringify({
+    model: 'x', max_tokens: 5,
+    messages: [{ role: 'user', content: 'hi' }],
+    tools: [{ name: 't', input_schema: { type: 'object', properties: { p: { type: 'string', pattern: '^a+$' } } } }],
+  });
+  const result = await new Promise((resolve, reject) => {
+    const req = http.request({
+      hostname: '127.0.0.1', port: shimPort, path: '/v1/messages?beta=true', method: 'POST',
+      headers: { 'content-type': 'application/json', 'content-length': Buffer.byteLength(payload) },
+      timeout: 5000,
+    }, (res) => {
+      let data = '';
+      res.on('data', (c) => { data += c; });
+      res.on('end', () => resolve({ status: res.statusCode, body: JSON.parse(data) }));
+    });
+    req.on('timeout', () => { req.destroy(); reject(new Error('shim relay timed out')); });
+    req.on('error', reject);
+    req.end(payload);
+  });
+  assert.strictEqual(result.status, 200, 'upstream answered 200 (body completed)');
+  assert.strictEqual(result.body.got, result.body.declared, 'declared length matches received bytes');
+  assert.strictEqual(result.body.stripped, true, 'pattern was stripped in flight');
+  await new Promise((r) => {
+    let n = 0;
+    const done = () => { if (++n === 2) r(); };
+    shim.close(done);
+    upstream.close(done);
+  });
+  process.stdout.write(`RELAY-TEST PASS got=${result.body.got}\n`);
+}
+
 // Self-test: the exact schema Meta rejected, plus nesting. No network.
-function selfTest() {
+async function selfTest() {
   const assert = require('assert');
   const rejected = {
     maxLength: 1024, minLength: 1, pattern: '^[^\0]*$', type: 'string',
@@ -216,6 +287,7 @@ function selfTest() {
     'no-strip leaves the schema untouched',
   );
   process.stdout.write(`SELF-TEST PASS tools=1 stripped=${JSON.stringify(stripped)}\n`);
+  await relaySelfTest();
 }
 
 const fs = require('fs');
@@ -295,7 +367,7 @@ async function stopShim() {
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.selfTest) {
-    selfTest();
+    await selfTest();
   } else if (args.stop) {
     await stopShim();
   } else if (args.ensure) {
