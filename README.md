@@ -94,7 +94,7 @@ IDE or editor (plus setup notes); each choice is labeled, one is
 recommended for your machine, and words work too (`cli`, `vscode`,
 `other`). Then paste your API key (never displayed, DPAPI-encrypted for
 your Windows user only). Finally, one UAC prompt writes Muse usage pricing
-(Meta per-token rates) to `C:\Program Files\ClaudeCode\managed-settings.json`,
+(Meta per-token rates) to `%ProgramFiles%\ClaudeCode\managed-settings.json`,
 so `/cost` prices Muse models instead of reporting "unknown models" â€”
 declining just keeps fallback pricing. It writes machine-local
 `settings.json` and adds the install directory to your user PATH. Open a **new** terminal

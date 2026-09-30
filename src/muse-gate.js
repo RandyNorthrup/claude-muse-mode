@@ -1,20 +1,38 @@
 #!/usr/bin/env node
-// muse-gate — UserPromptSubmit dispatcher shipped with claude-muse-mode.
-// Runs the previous tracker hook (default: caveman-mode-tracker.js beside
-// this file, override with MUSE_GATE_TRACKER_CMD), then appends the
-// anti-stall reminder ONLY while Muse mode is on. Claude mode gets the
-// tracker's output untouched, so no Muse accommodation leaks across modes.
-// Silent-fail: never blocks a prompt. `node muse-gate.js --self-test`
-// exercises the merge table with temp fixtures (no network, no settings).
+// muse-gate — hook dispatcher shipped with claude-muse-mode. Handles two events:
+// UserPromptSubmit: runs the previous tracker hook (default:
+// caveman-mode-tracker.js beside this file, override with
+// MUSE_GATE_TRACKER_CMD), then appends the anti-stall reminder ONLY while
+// Muse mode is on. Claude mode gets the tracker's output untouched.
+// Stop: while Muse mode is on, blocks the FIRST natural stop per response
+// chain (and at most STOP_BLOCK_CAP per session transcript) with a
+// turn-chain check, so a stalled turn keeps going instead of ending on a
+// status promise. Never blocks when off, when already continuing
+// (stop_hook_active), or when MUSE_GATE_NO_STOP=1. Silent-fail everywhere:
+// never blocks a prompt, never loops a stop.
+// `node muse-gate.js --self-test` exercises both tables with temp fixtures
+// (no network, no settings).
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const crypto = require('crypto');
 const { execFileSync } = require('child_process');
 
 const REMINDER = 'MUSE MODE: finish the turn chain. When task steps remain, ' +
   'keep calling tools — never end a turn on a status line promising the ' +
   'next step. Batch independent tool calls in one block; prose only when ' +
   'done or blocked.';
+
+// Stop-hook continuer: short + concrete. The model already saw REMINDER at
+// prompt time; this only fires when it stopped anyway, so it names the
+// exact check instead of repeating the whole rule.
+const STOP_REASON = 'MUSE MODE turn-chain check: if any task step remains ' +
+  '(edits, tests, gates, commits not yet done), keep calling tools — do not ' +
+  'end the turn with prose. If done or blocked, reply briefly and end.';
+// Max forced continuations per session transcript. The stop_hook_active
+// protocol flag is the primary loop guard (one block per chain); the cap
+// bounds total extra turns per session even if flags misbehave.
+const STOP_BLOCK_CAP = 2;
 
 function trackerPath() {
   return process.env.MUSE_GATE_TRACKER_CMD ||
@@ -77,6 +95,53 @@ function runTracker(input) {
   }
 }
 
+// --- Stop-hook continuer (Muse mode only) ---
+// Per-turn reminder text is advisory; the harness still ends the turn when
+// the model stops emitting tool calls. The Stop hook is the enforcement
+// point: block the first natural stop(s) per response chain so a stalled
+// turn continues instead of ending on a status promise.
+// Guards (fail-open, silent when any trips):
+// - off: Muse mode not detected -> '{}' (Claude mode provably untouched)
+// - stop_hook_active: already continuing from a previous block -> '{}'
+// - MUSE_GATE_NO_STOP=1: operator kill-switch -> '{}'
+// - STOP_BLOCK_CAP per session transcript: bounds extra turns per session.
+function stopStateDir() {
+  return process.env.MUSE_GATE_TEST_STATEDIR || path.join(os.tmpdir(), 'muse-gate-stop');
+}
+
+function stopCountFile(transcriptPath) {
+  const h = crypto.createHash('sha256').update(String(transcriptPath || 'no-transcript')).digest('hex').slice(0, 16);
+  return path.join(stopStateDir(), h + '.count');
+}
+
+function readStopCount(transcriptPath) {
+  try {
+    const n = Number(fs.readFileSync(stopCountFile(transcriptPath), 'utf8').trim());
+    return Number.isFinite(n) && n >= 0 ? n : 0;
+  } catch (e) {
+    return 0;
+  }
+}
+
+function bumpStopCount(transcriptPath) {
+  try {
+    fs.mkdirSync(stopStateDir(), { recursive: true });
+    fs.writeFileSync(stopCountFile(transcriptPath), String(readStopCount(transcriptPath) + 1));
+  } catch (e) { /* fail open: count lost, cap still bounds via next read */ }
+}
+
+// Pure decision: stop-hook input object + mode boolean -> output string.
+// '{}' = let the stop stand (silent). Block JSON = force one more turn.
+function buildStopOutput(stopInput, museOn) {
+  if (!museOn) return '{}';
+  if (process.env.MUSE_GATE_NO_STOP === '1') return '{}';
+  const inp = stopInput && typeof stopInput === 'object' ? stopInput : {};
+  if (inp.stop_hook_active) return '{}';
+  if (readStopCount(inp.transcript_path) >= STOP_BLOCK_CAP) return '{}';
+  bumpStopCount(inp.transcript_path);
+  return JSON.stringify({ decision: 'block', reason: STOP_REASON });
+}
+
 if (process.argv[2] === '--self-test') {
   const assert = require('assert');
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muse-gate-test-'));
@@ -115,7 +180,43 @@ if (process.argv[2] === '--self-test') {
     assert.strictEqual(buildOutput(block, true), block, 'block passes through');
     assert.ok(buildOutput('not-json{{{', true).indexOf('MUSE MODE') !== -1, 'bad tracker JSON + on');
     assert.strictEqual(buildOutput('not-json{{{', false), '', 'bad tracker JSON + off');
-    console.log('GATE-SELF-TEST PASS cases=13');
+    // --- Stop-hook continuer ---
+    const stopDir = path.join(tmp, 'stop-state');
+    fs.mkdirSync(stopDir);
+    process.env.MUSE_GATE_TEST_STATEDIR = stopDir;
+    try {
+      const stopIn = { hook_event_name: 'Stop', transcript_path: path.join(tmp, 't1.jsonl') };
+      // Off: silent '{}' even for a fresh stop.
+      assert.strictEqual(buildStopOutput(stopIn, false), '{}', 'stop off silent');
+      // On: first stop blocked with the turn-chain check.
+      const b1 = JSON.parse(buildStopOutput(stopIn, true));
+      assert.strictEqual(b1.decision, 'block', 'stop on blocks once');
+      assert.ok(String(b1.reason).indexOf('turn-chain') !== -1, 'stop reason names check');
+      // Second stop: still under cap -> blocked.
+      const b2 = JSON.parse(buildStopOutput(stopIn, true));
+      assert.strictEqual(b2.decision, 'block', 'stop on blocks twice');
+      // Third stop: cap reached -> silent.
+      assert.strictEqual(buildStopOutput(stopIn, true), '{}', 'stop cap holds');
+      // stop_hook_active: already continuing -> silent, no count burned.
+      const active = { hook_event_name: 'Stop', stop_hook_active: true, transcript_path: path.join(tmp, 't2.jsonl') };
+      assert.strictEqual(buildStopOutput(active, true), '{}', 'stop active silent');
+      assert.strictEqual(readStopCount(path.join(tmp, 't2.jsonl')), 0, 'stop active burns no count');
+      // Kill-switch: silent.
+      process.env.MUSE_GATE_NO_STOP = '1';
+      try {
+        assert.strictEqual(buildStopOutput(stopIn, true), '{}', 'stop kill-switch silent');
+      } finally {
+        delete process.env.MUSE_GATE_NO_STOP;
+      }
+      // Garbage input: null folds to the no-transcript bucket (bounded by
+      // the cap like any other transcript), never a crash.
+      assert.strictEqual(buildStopOutput(null, false), '{}', 'stop null off silent');
+      const bn = JSON.parse(buildStopOutput(null, true));
+      assert.strictEqual(bn.decision, 'block', 'stop null on blocks via shared bucket');
+    } finally {
+      delete process.env.MUSE_GATE_TEST_STATEDIR;
+    }
+    console.log('GATE-SELF-TEST PASS cases=21');
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
@@ -126,6 +227,14 @@ let input = '';
 process.stdin.on('data', c => { input += c; });
 process.stdin.on('end', () => {
   try {
+    let hookEvent = '';
+    try { hookEvent = String(JSON.parse(input).hook_event_name || ''); } catch (e) { hookEvent = ''; }
+    if (hookEvent === 'Stop') {
+      let parsed = null;
+      try { parsed = JSON.parse(input); } catch (e) { parsed = null; }
+      process.stdout.write(buildStopOutput(parsed, museModeOn(settingsPath())));
+      return;
+    }
     process.stdout.write(buildOutput(runTracker(input), museModeOn(settingsPath())));
   } catch (e) { /* silent */ }
 });

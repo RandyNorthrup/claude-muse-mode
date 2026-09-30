@@ -9,7 +9,7 @@
   only), and adds the install directory to your user PATH so plain
   `muse-mode on | off | status` works in any terminal. It also writes Muse
   usage pricing (Meta per-Mtok rates) to
-  C:\Program Files\ClaudeCode\managed-settings.json (one UAC prompt),
+  %ProgramFiles%\ClaudeCode\managed-settings.json (one UAC prompt),
   so /cost prices Muse models instead of reporting "unknown models".
 
   The key is held as a SecureString, never printed, never logged, and the
@@ -317,7 +317,11 @@ function Get-ManagedSettingsPath {
   if (-not [string]::IsNullOrWhiteSpace($env:MUSE_TEST_MANAGED_SETTINGS)) {
     return $env:MUSE_TEST_MANAGED_SETTINGS
   }
-  return 'C:\Program Files\ClaudeCode\managed-settings.json'
+  # No hardcoded drive: resolve the real Program Files on this machine
+  # (%ProgramFiles%, honoring 32/64-bit redirection via the env var).
+  $programFiles = $env:ProgramFiles
+  if ([string]::IsNullOrWhiteSpace($programFiles)) { $programFiles = 'C:\Program Files' }
+  return (Join-Path $programFiles 'ClaudeCode\managed-settings.json')
 }
 
 function Install-MusePricing {
@@ -363,12 +367,13 @@ function Install-MusePricing {
   }
   Write-UiLine ' Muse usage pricing needs one admin step (Step 3 of 3).' Yellow
   Write-UiLine ' A UAC prompt will ask for permission to write'
-  Write-UiLine ' C:\Program Files\ClaudeCode\managed-settings.json'
+  Write-UiLine " $path"
   Write-UiLine ' (Meta per-token rates, so /cost stops saying "unknown models").'
   try {
     $tmp = Join-Path ([IO.Path]::GetTempPath()) 'muse-managed-settings.json'
     Write-Utf8NoBom $tmp $wanted
-    $cmd = "New-Item -ItemType Directory -Path 'C:\Program Files\ClaudeCode' -Force | Out-Null; " +
+    $managedDir = Split-Path $path -Parent
+    $cmd = "New-Item -ItemType Directory -Path '$managedDir' -Force | Out-Null; " +
       "Copy-Item -LiteralPath '$tmp' -Destination '$path' -Force; " +
       "Remove-Item -LiteralPath '$tmp' -Force -ErrorAction SilentlyContinue"
     $proc = Start-Process powershell -Verb RunAs -ArgumentList @(
@@ -415,9 +420,12 @@ function Get-ClaudeSettingsPath {
 
 function Install-MuseGate([string]$SourcePath) {
   # Copies muse-gate.js to the Claude hooks dir and points the
-  # UserPromptSubmit hook at it. The dispatcher runs the previous tracker
-  # itself, then appends the anti-stall reminder only while Muse mode is
-  # on; Claude-mode output is untouched. Unknown hook shapes are left
+  # UserPromptSubmit hook at it, plus registers a Stop hook on the same
+  # dispatcher (the Stop continuer forces one more turn while Muse mode is
+  # on, capped at 2 per transcript; Claude mode gets '{}' so stops stand).
+  # The dispatcher runs the previous tracker itself for UserPromptSubmit,
+  # then appends the anti-stall reminder only while Muse mode is on;
+  # Claude-mode output is untouched. Unknown hook shapes are left
   # alone loudly. Returns $true when registered (or already current, or
   # nothing to register yet), $false when skipped.
   if ([string]::IsNullOrWhiteSpace($SourcePath)) {
@@ -436,46 +444,84 @@ function Install-MuseGate([string]$SourcePath) {
     return $true
   }
   $text = Get-Content -Raw -LiteralPath $settingsPath
-  if ($text -match 'muse-gate\.js') {
+  $promptDone = $text -match 'muse-gate\.js'
+  if ($promptDone) {
     Write-Output 'Turn-chain reminder already set.'
-    return $true
   }
-  if (([regex]::Matches($text, 'caveman-mode-tracker\.js')).Count -ne 1) {
+  elseif (([regex]::Matches($text, 'caveman-mode-tracker\.js')).Count -ne 1) {
     Write-Output 'UserPromptSubmit hook is not the known tracker; leaving it alone (turn-chain reminder not installed).'
     return $false
   }
-  Copy-Item -LiteralPath $settingsPath -Destination "$settingsPath.bak-muse-gate" -Force -ErrorAction SilentlyContinue
-  $nl = "`n"
-  if ($text.Contains("`r`n")) { $nl = "`r`n" }
-  $lines = $text -split $nl
-  $bumped = $false
-  for ($i = 0; $i -lt $lines.Count; $i++) {
-    if ($lines[$i] -match 'caveman-mode-tracker\.js') {
-      $lines[$i] = $lines[$i] -replace 'caveman-mode-tracker\.js', 'muse-gate.js'
-      if ($lines[$i] -match '"timeout"') {
-        $lines[$i] = $lines[$i] -replace '"timeout":\s*5', '"timeout": 10'
-        $bumped = $true
-      }
-      for ($j = $i + 1; ($j -lt $lines.Count) -and (-not $bumped); $j++) {
-        if ($lines[$j] -match '"timeout"') {
-          $lines[$j] = $lines[$j] -replace '"timeout":\s*5', '"timeout": 10'
-          $bumped = $true
-        }
-      }
-      break
+  else {
+    # JSON edit (not line surgery): swap the tracker command for the
+    # dispatcher and bump only that entry's timeout. Line surgery could
+    # hit an unrelated hook's timeout in single-line files.
+    Copy-Item -LiteralPath $settingsPath -Destination "$settingsPath.bak-muse-gate" -Force -ErrorAction SilentlyContinue
+    try {
+      $doc = Get-Content -Raw -LiteralPath $settingsPath | ConvertFrom-Json
+      $upsHooks = $doc.hooks.UserPromptSubmit.hooks
+      if ($upsHooks.command -notmatch 'caveman-mode-tracker\.js') { throw 'tracker command moved' }
+      $upsHooks.command = $upsHooks.command -replace 'caveman-mode-tracker\.js', 'muse-gate.js'
+      if ($upsHooks.timeout -eq 5) { $upsHooks.timeout = 10 }
+      Write-Utf8NoBom $settingsPath ($doc | ConvertTo-Json -Depth 32)
+      $check = Get-Content -Raw -LiteralPath $settingsPath | ConvertFrom-Json
+      if ($check.hooks.UserPromptSubmit.hooks.command -notmatch 'muse-gate\.js') { throw 'verification failed' }
     }
+    catch {
+      Copy-Item -LiteralPath "$settingsPath.bak-muse-gate" -Destination $settingsPath -Force -ErrorAction SilentlyContinue
+      Write-Warning 'Turn-chain reminder verification failed; settings restored.'
+      return $false
+    }
+    Write-Output 'Turn-chain reminder installed (Muse mode only; Claude mode untouched).'
+    $text = Get-Content -Raw -LiteralPath $settingsPath
   }
-  Write-Utf8NoBom $settingsPath ($lines -join $nl)
+  # Stop hook: same dispatcher, fail-closed registration - the dispatcher
+  # itself decides (off/continuing/capped -> '{}', silent). Only add when
+  # the hook table parses as JSON; anything else is left alone loudly.
   try {
-    $check = Get-Content -Raw -LiteralPath $settingsPath | ConvertFrom-Json
-    if ($check.hooks.UserPromptSubmit.hooks.command -notmatch 'muse-gate\.js') { throw 'verification failed' }
+    $doc = Get-Content -Raw -LiteralPath $settingsPath | ConvertFrom-Json
+  }
+  catch {
+    Write-Warning 'Claude settings.json does not parse; Stop hook not installed.'
+    return $false
+  }
+  if (-not $doc.hooks) { return $true }
+  $stopCmd = $null
+  try { $stopCmd = $doc.hooks.Stop.hooks.command } catch { $stopCmd = $null }
+  if ($stopCmd -match 'muse-gate\.js') {
+    Write-Output 'Turn-chain Stop hook already set.'
+    return $true
+  }
+  if ($null -ne $stopCmd) {
+    Write-Output 'A foreign Stop hook exists; leaving it alone (turn-chain Stop hook not installed).'
+    return $true
+  }
+  Copy-Item -LiteralPath $settingsPath -Destination "$settingsPath.bak-muse-gate" -Force -ErrorAction SilentlyContinue
+  try {
+    if ($doc.hooks.Stop) { $doc.hooks.Stop | Add-Member -NotePropertyName 'hooks' -NotePropertyValue ([ordered]@{}) -Force }
+    else { $doc.hooks | Add-Member -NotePropertyName 'Stop' -NotePropertyValue ([ordered]@{ hooks = ([ordered]@{}) }) -Force }
+    $nodeCmd = 'node'
+    try {
+      $ups = $doc.hooks.UserPromptSubmit.hooks.command
+      if ($ups -match '^"([^"]+)"') { $nodeCmd = '"' + $Matches[1] + '"' }
+    } catch { $nodeCmd = 'node' }
+    $hookFile = Join-Path (Get-ClaudeHooksDir) 'muse-gate.js'
+    $doc.hooks.Stop.hooks = [ordered]@{
+      type = 'command'
+      command = "$nodeCmd `"$hookFile`""
+      timeout = 10
+      statusMessage = 'Checking turn chain...'
+    }
+    Write-Utf8NoBom $settingsPath ($doc | ConvertTo-Json -Depth 32)
+    $verify = Get-Content -Raw -LiteralPath $settingsPath | ConvertFrom-Json
+    if ($verify.hooks.Stop.hooks.command -notmatch 'muse-gate\.js') { throw 'verification failed' }
   }
   catch {
     Copy-Item -LiteralPath "$settingsPath.bak-muse-gate" -Destination $settingsPath -Force -ErrorAction SilentlyContinue
-    Write-Warning 'Turn-chain reminder verification failed; settings restored.'
+    Write-Warning 'Turn-chain Stop hook verification failed; settings restored.'
     return $false
   }
-  Write-Output 'Turn-chain reminder installed (Muse mode only; Claude mode untouched).'
+  Write-Output 'Turn-chain Stop hook installed (Muse mode only; Claude mode untouched).'
   return $true
 }
 

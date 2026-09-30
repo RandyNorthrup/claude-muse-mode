@@ -420,6 +420,19 @@ Describe 'muse usage pricing' {
       Remove-Item Env:\MUSE_TEST_MANAGED_SETTINGS -ErrorAction SilentlyContinue
     }
   }
+
+  It 'managed path resolves Program Files without a hardcoded drive' {
+    $saved = $env:MUSE_TEST_MANAGED_SETTINGS
+    Remove-Item Env:\MUSE_TEST_MANAGED_SETTINGS -ErrorAction SilentlyContinue
+    try {
+      $got = Get-ManagedSettingsPath
+      $got | Should -Match 'ClaudeCode.managed-settings\.json$'
+      $got | Should -Be (Join-Path $env:ProgramFiles 'ClaudeCode\managed-settings.json')
+    }
+    finally {
+      if ($null -ne $saved) { $env:MUSE_TEST_MANAGED_SETTINGS = $saved }
+    }
+  }
 }
 
 Describe 'muse turn-chain gate' {
@@ -481,8 +494,12 @@ Describe 'muse turn-chain gate' {
       $after = Get-Content -Raw -LiteralPath $env:MUSE_TEST_CLAUDE_SETTINGS | ConvertFrom-Json
       $after.hooks.UserPromptSubmit.hooks.command | Should -Match 'muse-gate\.js'
       $after.hooks.UserPromptSubmit.hooks.timeout | Should -Be 10
+      $after.hooks.Stop.hooks.command | Should -Match 'muse-gate\.js'
+      $after.hooks.Stop.hooks.timeout | Should -Be 10
       $second = @(Install-MuseGate -SourcePath $gateJs)
       $second[-1] | Should -Be $true
+      $rerun = Get-Content -Raw -LiteralPath $env:MUSE_TEST_CLAUDE_SETTINGS | ConvertFrom-Json
+      $rerun.hooks.Stop.hooks.command | Should -Match 'muse-gate\.js'
       '{"hooks":{"UserPromptSubmit":{"hooks":{"type":"command","command":"node other.js","timeout":5}}}}' |
         Set-Content -LiteralPath $env:MUSE_TEST_CLAUDE_SETTINGS -Encoding Ascii
       $before = Get-Content -Raw -LiteralPath $env:MUSE_TEST_CLAUDE_SETTINGS
@@ -495,6 +512,56 @@ Describe 'muse turn-chain gate' {
     finally {
       Remove-Item Env:\MUSE_TEST_HOOKS_DIR -ErrorAction SilentlyContinue
       Remove-Item Env:\MUSE_TEST_CLAUDE_SETTINGS -ErrorAction SilentlyContinue
+      Remove-Item -LiteralPath $t -Recurse -Force -ErrorAction SilentlyContinue
+    }
+  }
+
+  It 'leaves a foreign Stop hook alone and adds none' {
+    $t = Join-Path ([IO.Path]::GetTempPath()) ('muse-gate-stop-' + [Guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $t | Out-Null
+    $env:MUSE_TEST_HOOKS_DIR = Join-Path $t 'hooks'
+    $env:MUSE_TEST_CLAUDE_SETTINGS = Join-Path $t 'claude.json'
+    try {
+      '{"hooks":{"UserPromptSubmit":{"hooks":{"type":"command","command":"node C:\\x\\caveman-mode-tracker.js","timeout":5}},"Stop":{"hooks":{"type":"command","command":"node other-stop.js","timeout":5}}}}' |
+        Set-Content -LiteralPath $env:MUSE_TEST_CLAUDE_SETTINGS -Encoding Ascii
+      $r = @(Install-MuseGate -SourcePath $gateJs)
+      $r[-1] | Should -Be $true
+      $after = Get-Content -Raw -LiteralPath $env:MUSE_TEST_CLAUDE_SETTINGS | ConvertFrom-Json
+      $after.hooks.Stop.hooks.command | Should -Be 'node other-stop.js'
+      $after.hooks.UserPromptSubmit.hooks.command | Should -Match 'muse-gate\.js'
+    }
+    finally {
+      Remove-Item Env:\MUSE_TEST_HOOKS_DIR -ErrorAction SilentlyContinue
+      Remove-Item Env:\MUSE_TEST_CLAUDE_SETTINGS -ErrorAction SilentlyContinue
+      Remove-Item -LiteralPath $t -Recurse -Force -ErrorAction SilentlyContinue
+    }
+  }
+
+  It 'Stop blocks while on and stays silent while off' {
+    $t = Join-Path ([IO.Path]::GetTempPath()) ('muse-gate-live-' + [Guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $t | Out-Null
+    try {
+      $im = Join-Path $t 'install'
+      New-Item -ItemType Directory -Path $im | Out-Null
+      '{}' | Set-Content -LiteralPath (Join-Path $im 'saved-anthropic.json') -Encoding Ascii
+      $on = Join-Path $t 'on.json'
+      $off = Join-Path $t 'off.json'
+      (@{ apiKeyHelper = 'powershell -File ' + ((Join-Path $im 'key.ps1') -replace '\\', '/') } | ConvertTo-Json) |
+        Set-Content -LiteralPath $on -Encoding Ascii
+      (@{ apiKeyHelper = 'other-helper' } | ConvertTo-Json) |
+        Set-Content -LiteralPath $off -Encoding Ascii
+      $env:MUSE_GATE_TEST_STATEDIR = Join-Path $t 'stop-state'
+      $env:MUSE_GATE_TEST_SETTINGS = $on
+      $blocked = ('{"hook_event_name":"Stop","transcript_path":"' + ($t -replace '\\', '/') + '/live.jsonl"}' | & node $gateJs)
+      $blocked | Should -Match '"block"'
+      $blocked | Should -Match 'turn-chain'
+      $env:MUSE_GATE_TEST_SETTINGS = $off
+      $quiet = ('{"hook_event_name":"Stop","transcript_path":"' + ($t -replace '\\', '/') + '/live.jsonl"}' | & node $gateJs)
+      $quiet | Should -Be '{}'
+    }
+    finally {
+      Remove-Item Env:\MUSE_GATE_TEST_STATEDIR -ErrorAction SilentlyContinue
+      Remove-Item Env:\MUSE_GATE_TEST_SETTINGS -ErrorAction SilentlyContinue
       Remove-Item -LiteralPath $t -Recurse -Force -ErrorAction SilentlyContinue
     }
   }
